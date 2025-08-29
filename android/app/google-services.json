@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "490578129393",
+    "project_id": "jur-gui",
+    "storage_bucket": "jur-gui.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:490578129393:android:0488b9e3de48dd932cd450",
+        "android_client_info": {
+          "package_name": "com.te.depart"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDYF3q8cGzKui9X_bQ9Un21ot8HxFKZlTE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
