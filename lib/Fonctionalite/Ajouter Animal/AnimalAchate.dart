@@ -95,6 +95,7 @@ class _AjouteranimalState extends State<AnimalAchate> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            
             // Titre
             const Center(
               child: Text(

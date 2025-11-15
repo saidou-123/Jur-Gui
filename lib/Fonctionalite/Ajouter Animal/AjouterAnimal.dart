@@ -39,7 +39,7 @@ class AjouterAnimal extends StatelessWidget {
                     image: 'assets/image/img6.png',
                     label: "Nouveau-né",
 
-                    route: const Nouveau_Nee(),
+                    route: const  NouveauNeePage(),
                   ),
                 ),
                 const SizedBox(width: 16),

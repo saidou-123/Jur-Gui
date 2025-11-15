@@ -75,6 +75,7 @@ class _AjouteranimalState extends State<Accouplement> {
                       prefixIcon: Icon(Icons.list),
                     ),
                     value: _selectedRace,
+                    
                     items: const [
                       DropdownMenuItem(value: "Ladoum", child: Text("Ladoum")),
                       DropdownMenuItem(value: "Peulh", child: Text("Peulh")),
@@ -92,6 +93,23 @@ class _AjouteranimalState extends State<Accouplement> {
                   const SizedBox(height: 15),
 
                   // Brebis
+
+ Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  decoration: InputDecoration(
+                   labelText: "Sélectionner une brebis",
+
+                    border: OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.list),
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+
                   DropdownButtonFormField(
                     decoration: const InputDecoration(
                       labelText: "Sélectionner une brebis",
@@ -100,12 +118,9 @@ class _AjouteranimalState extends State<Accouplement> {
                     ),
                     value: _selectedRace,
                     items: const [
-                      DropdownMenuItem(value: "Ladoum", child: Text("Ladoum")),
+                     
                       DropdownMenuItem(value: "Peulh", child: Text("Peulh")),
-                      DropdownMenuItem(
-                        value: "Touabire",
-                        child: Text("Touabire"),
-                      ),
+      
                     ],
                     onChanged: (value) {
                       setState(() {
