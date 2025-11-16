@@ -1,5 +1,4 @@
-// import 'package:depart/pages/acceuil.dart';
-
+import 'package:depart/Fonctionalite/Ajouter%20Animal/NouveauNee.dart';
 import 'package:depart/pages/acceuil.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -19,7 +18,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       color: Colors.white,
       title: "USSEINPAY ",
-      home: Acceuil(),
+      home: NouveauNeePage(),
       debugShowCheckedModeBanner: false,
     );
   }
