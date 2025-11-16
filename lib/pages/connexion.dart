@@ -1,25 +1,78 @@
+// 🔴 NOUVEAU NOM DE CLASSE POUR CORRESPONDRE À main.dart
+import 'package:depart/pages/connect.dart';
 import 'package:depart/pages/inscription.dart' show Inscription;
 import 'package:depart/widgets/carre.dart' show Carre;
-import 'package:depart/widgets/inputs.dart';
-import 'package:flutter/material.dart';
 import 'package:depart/widgets/couleur.dart';
+import 'package:flutter/material.dart';
 
+// 🟢 IMPORTS AJOUTÉS
+import 'package:supabase_flutter/supabase_flutter.dart';
+// Assurez-vous que le chemin est correct
+
+// 🔴 J'ai renommé la classe en 'Connect' pour correspondre à votre main.dart
 class Connexion extends StatefulWidget {
   const Connexion({super.key});
 
   @override
-  State<Connexion> createState() => _ConnexionState();
+  State<Connexion> createState() => _ConnectState();
 }
 
-class _ConnexionState extends State<Connexion> {
+// 🔴 J'ai renommé la classe en '_ConnectState'
+class _ConnectState extends State<Connexion> {
+  // 🟢 STATE AJOUTÉ
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  bool _isLoading = false;
+  final supabase = Supabase.instance.client; // 🟢 Client Supabase
+
+  @override
+  void dispose() {
+    // 🟢 Bonne pratique
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  // 🟢 FONCTION DE CONNEXION AJOUTÉE
+  Future<void> _signIn() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+    try {
+      final response = await supabase.auth.signInWithPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+
+      // Si la connexion réussit, on navigue
+      if (response.user != null && mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const Connect()),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("Erreur de connexion : ${e.toString()}"),
+          backgroundColor: Colors.red,
+        ));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
           child: Container(
-            padding: EdgeInsets.only(top: 10),
-            margin: EdgeInsets.all(30),
+            padding: const EdgeInsets.only(top: 10),
+            margin: const EdgeInsets.all(30),
             child: Column(
               children: [
                 Image.asset("assets/image/img3.png", width: 200),
@@ -35,39 +88,65 @@ class _ConnexionState extends State<Connexion> {
                   "Bienvenue a nouveau sur votre application ",
                   style: TextStyle(color: Couleur.PremierColor),
                 ),
-                SizedBox(height: 10),
+                const SizedBox(height: 10),
+                // 🟢 UTILISATION D'UN FORM ET DE TEXTFORMFIELDS
                 Form(
+                  key: _formKey, // 🟢 Clé de formulaire
                   child: Column(
                     children: [
-                      Inputs(
-                        label: "Email",
-                        hint: " Votre Adresse Email ",
-                        iconColor: Couleur.PremierColor,
-                        icon: Icons.email,
+                      // 🟢 Remplacement de Inputs par TextFormField
+                      TextFormField(
+                        controller: _emailController,
+                        decoration: InputDecoration(
+                          labelText: "Email",
+                          hintText: " Votre Adresse Email ",
+                          prefixIcon: Icon(Icons.email, color: Couleur.PremierColor),
+                          border: const OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.emailAddress,
+                        validator: (value) {
+                          if (value == null || value.isEmpty || !value.contains('@')) {
+                            return 'Veuillez entrer un email valide';
+                          }
+                          return null;
+                        },
                       ),
-
-                      Inputs(
-                        label: "Mots De Passe",
-                        hint: "Votre Mots De Passe",
-                        icon: Icons.lock,
-                        iconColor: Couleur.PremierColor,
-                        isPassword: true, // Active le mode mot de passe
+                      const SizedBox(height: 15),
+                      // 🟢 Remplacement de Inputs par TextFormField
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: true, // 🟢 Gère le mot de passe
+                        decoration: InputDecoration(
+                          labelText: "Mots De Passe",
+                          hintText: "Votre Mots De Passe",
+                          prefixIcon: Icon(Icons.lock, color: Couleur.PremierColor),
+                          border: const OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Veuillez entrer votre mot de passe';
+                          }
+                          return null;
+                        },
                       ),
-
-                      SizedBox(height: 20),
+                      const SizedBox(height: 20),
                       SizedBox(
                         width: double.infinity,
+                        height: 50,
                         child: ElevatedButton(
-                          onPressed: () {},
-                          child: Text(
-                            "Se Connecter",
-                            style: TextStyle(color: Couleur.PremierColor),
-                          ),
+                          // 🟢 Logique pour le bouton
+                          onPressed: _isLoading ? null : _signIn,
+                          child: _isLoading
+                              ? const CircularProgressIndicator(color: Colors.white)
+                              : Text(
+                                  "Se Connecter",
+                                  style: TextStyle(color: Couleur.PremierColor),
+                                ),
                         ),
                       ),
-                      SizedBox(height: 10),
+                      const SizedBox(height: 10),
                       Row(
-                        children: [
+                        children: const [
                           Expanded(child: Divider(thickness: 0.5)),
                           Padding(
                             padding: EdgeInsets.symmetric(horizontal: 10),
@@ -76,30 +155,29 @@ class _ConnexionState extends State<Connexion> {
                           Expanded(child: Divider(thickness: 0.5)),
                         ],
                       ),
-                      SizedBox(height: 10),
+                      const SizedBox(height: 10),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
+                        children: const [
                           Carre(path: "assets/image/img13.png"),
                           SizedBox(width: 10),
                           Carre(path: "assets/image/img13.png"),
                         ],
                       ),
-
-                      SizedBox(height: 20),
+                      const SizedBox(height: 20),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text("Pas de compte ?"),
+                          const Text("Pas de compte ?"),
                           GestureDetector(
                             onTap: () {
                               Navigator.of(context).pushReplacement(
                                 MaterialPageRoute(
-                                  builder: (context) => Inscription(),
+                                  builder: (context) => const Inscription(),
                                 ),
                               );
                             },
-                            child: Text(
+                            child: const Text(
                               "Inscrivez Vous",
                               style: TextStyle(
                                 color: Colors.red,
