@@ -18,7 +18,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       color: Colors.white,
       title: "USSEINPAY ",
-      home: NouveauNeePage(),
+      home: Acceuil(),
       debugShowCheckedModeBanner: false,
     );
   }

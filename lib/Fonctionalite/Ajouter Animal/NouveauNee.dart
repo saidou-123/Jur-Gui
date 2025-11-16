@@ -1,7 +1,8 @@
-import 'dart:io'; 
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:web_socket_channel/web_socket_channel.dart'; // 🔵 WEBSOCKET
 
 final supabase = Supabase.instance.client;
 
@@ -13,28 +14,66 @@ class NouveauNeePage extends StatefulWidget {
 }
 
 class _NouveauNeePageState extends State<NouveauNeePage> {
+  // ------------------ CONTROLLERS ------------------------
   final _nomController = TextEditingController();
   final _raceController = TextEditingController();
   final _dateController = TextEditingController();
-  // 🔵 NOUVEAU : champ pour l’UID affiché dans le formulaire
   final _uidController = TextEditingController();
 
+  // ------------------ VARIABLES --------------------------
   String? _selectedSexe;
   XFile? _pickedFile;
   bool _isLoading = false;
-
   String? _tagRFID;
 
-  // 🔵 MODIFIÉ : quand l’ESP32 envoie l’UID → on l'affiche dans le champ
+  // 🔵 WEBSOCKET CHANNEL
+  WebSocketChannel? channel;
+
+  // ----------------------------------------------------------
+  // 🔵 INITSTATE : Connexion WebSocket ESP32
+  // ----------------------------------------------------------
+  @override
+  void initState() {
+    super.initState();
+
+    try {
+      channel = WebSocketChannel.connect(
+        Uri.parse("ws://192.168.4.1:81"), // 🔥 IP de l'ESP32 en mode AP
+      );
+
+      channel!.stream.listen((message) {
+        print("📡 UID reçu : $message");
+        _onTagDetected(message);
+      }, onError: (e) {
+        print("❌ WebSocket Error : $e");
+      }, onDone: () {
+        print("🔌 WebSocket fermé");
+      });
+
+    } catch (e) {
+      print("⚠️ Impossible de se connecter au WebSocket : $e");
+    }
+  }
+
+  // 🔵 Fermeture propre
+  @override
+  void dispose() {
+    channel?.sink.close();
+    super.dispose();
+  }
+
+  // ----------------------------------------------------------
+  // 🔵 Quand l’ESP32 envoie l’UID RFID → On met à jour l’UI
+  // ----------------------------------------------------------
   void _onTagDetected(String uid) {
     setState(() {
       _tagRFID = uid;
-      _uidController.text = uid; // <-- l’UID arrive ici
+      _uidController.text = uid;
     });
   }
 
   // ----------------------------------------------------------
-  //                  IMAGE PICKER
+  //                 IMAGE PICKER
   // ----------------------------------------------------------
   Future<void> _pickImageFromGallery() async {
     final picker = ImagePicker();
@@ -89,16 +128,19 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
   }
 
   // ----------------------------------------------------------
-  //                     UPLOAD IMAGE
+  //                UPLOAD IMAGE SUPABASE
   // ----------------------------------------------------------
   Future<String?> _uploadImage(XFile image) async {
     try {
-      final fileName = 'nouveaux_nee/${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final fileName =
+          'nouveaux_nee/${DateTime.now().millisecondsSinceEpoch}.jpg';
+
       final bytes = await File(image.path).readAsBytes();
 
       await supabase.storage
           .from('uploads')
-          .uploadBinary(fileName, bytes, fileOptions: const FileOptions(upsert: true));
+          .uploadBinary(fileName, bytes,
+              fileOptions: const FileOptions(upsert: true));
 
       return supabase.storage.from('uploads').getPublicUrl(fileName);
     } catch (e) {
@@ -119,7 +161,7 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
         _tagRFID == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Veuillez remplir tous les champs, ajouter une photo et scanner un Tag RFID"),
+          content: Text("Veuillez remplir tout le formulaire"),
           backgroundColor: Colors.red,
         ),
       );
@@ -130,24 +172,25 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
 
     try {
       final url = await _uploadImage(_pickedFile!);
-      if (url == null) throw ("Erreur lors de l'upload de l'image");
 
-      await supabase.from('nouveaux_nee').insert({
-        'nom': _nomController.text,
-        'race': _raceController.text,
-        'date_naissance': _dateController.text,
-        'sexe': _selectedSexe,
-        'image_url': url,
-        'tag_rfid': _tagRFID,
-        'created_at': DateTime.now().toIso8601String(),
-      });
+      if (url == null) throw ("Erreur upload image");
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Nouveau-né enregistré avec succès !"),
-          backgroundColor: Colors.green,
-        ),
-      );
+     await supabase.from('nouveaux_nee').insert({
+  'nom': _nomController.text,
+  'race': _raceController.text,
+  'date_naissance': _dateController.text,
+  'sexe': _selectedSexe,
+  'image_url': url,
+  'tag_rfid': _tagRFID,
+  'user_id': supabase.auth.currentUser!.id,   // 🟢 AJOUT OBLIGATOIRE
+  'created_at': DateTime.now().toIso8601String(),
+});
+
+
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Nouveau-né enregistré avec succès !"),
+        backgroundColor: Colors.green,
+      ));
 
       _nomController.clear();
       _raceController.clear();
@@ -159,7 +202,6 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
         _pickedFile = null;
         _tagRFID = null;
       });
-
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Erreur : $e"), backgroundColor: Colors.red),
@@ -170,7 +212,7 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
   }
 
   // ----------------------------------------------------------
-  //                   UI
+  //                           UI
   // ----------------------------------------------------------
   @override
   Widget build(BuildContext context) {
@@ -183,13 +225,11 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            const Text(
-              "Ajouter un nouveau-né",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
+            const Text("Ajouter un nouveau-né",
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             const SizedBox(height: 20),
 
-            // -------------------- PHOTO ------------------------
+            // ------------------- PHOTO -------------------
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(16),
@@ -198,27 +238,16 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
                 border: Border.all(color: Colors.grey.shade400),
                 borderRadius: BorderRadius.circular(12),
               ),
-               child: Column(
-             children: [
-            _pickedFile != null
-                ? ClipRRect(
-                   borderRadius: BorderRadius.circular(8),
-               child: Image.file(
-               File(_pickedFile!.path),
-                height: 120,
-                  width: 120,
-                     fit: BoxFit.cover,
-               ),
-                    )
-                 : const Icon(Icons.camera_alt,
-                   size: 60, color: Colors.grey),
-                    const SizedBox(height: 10),
-                    Text(
-                      _pickedFile != null
-                     ? "Photo ajoutée"
-                      : "Aucune photo sélectionnée",
-                       style: const TextStyle(color: Colors.black54),
-                  ),
+              child: Column(
+                children: [
+                  _pickedFile != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(File(_pickedFile!.path),
+                              height: 120, width: 120, fit: BoxFit.cover),
+                        )
+                      : const Icon(Icons.camera_alt,
+                          size: 60, color: Colors.grey),
                   const SizedBox(height: 10),
                   ElevatedButton.icon(
                     onPressed: _showImageSourceDialog,
@@ -227,17 +256,15 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green[700],
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      ),
                     ),
                   ),
                 ],
               ),
             ),
 
-           const SizedBox(height: 25),
-            // -------------------- FORMULAIRE ------------------------
+            const SizedBox(height: 25),
+
+            // ------------------- FORMULAIRE -------------------
             TextFormField(
               controller: _nomController,
               decoration: const InputDecoration(
@@ -293,9 +320,10 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
                 }
               },
             ),
-           const SizedBox(height: 15),
 
-            // 🔵 -------------------- CHAMP UID ------------------------
+            const SizedBox(height: 15),
+
+            // 🔵 ------------------ UID REÇU ------------------
             TextFormField(
               controller: _uidController,
               readOnly: true,
@@ -308,13 +336,13 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
               style: const TextStyle(
                 fontWeight: FontWeight.bold,
                 letterSpacing: 2,
-                fontSize: 16,
               ),
             ),
 
-            // -------------------- RFID ------------------------
+            const SizedBox(height: 25),
+
+            // ------------------- RFID STATE -------------------
             Container(
-              margin: const EdgeInsets.only(top: 25),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.blue.shade50,
@@ -325,7 +353,6 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
                 children: [
                   const Icon(Icons.nfc, size: 50, color: Colors.blue),
                   const SizedBox(height: 10),
-
                   Text(
                     _tagRFID != null
                         ? "Tag RFID détecté : $_tagRFID"
@@ -333,58 +360,34 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
                     style: const TextStyle(
                         fontSize: 16, fontWeight: FontWeight.bold),
                   ),
-
-                  const SizedBox(height: 12),
-
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      _onTagDetected("4A7C2F90"); // simulation
-                    },
-                    icon: const Icon(Icons.qr_code_2),
-                    label: const Text("Scanner un Tag RFID"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue,
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size(double.infinity, 45),
-                    ),
-                  ),
                 ],
               ),
             ),
 
             const SizedBox(height: 30),
 
-            // -------------------- BOUTON ------------------------
+            // ------------------- BOUTON -------------------
             SizedBox(
- width: double.infinity,
- height: 50,
-child: ElevatedButton.icon(
- onPressed: _isLoading ? null : _enregistrer,
-icon: _isLoading
-? const SizedBox(
- height: 20,
-width: 20,
-child: CircularProgressIndicator(
- color: Colors.white,
-strokeWidth: 2,
-),
-)
- : const Icon(Icons.check_circle),
- label: Text(
-_isLoading
- ? "Enregistrement..."
- : "Enregistrer le nouveau-né",
- style: const TextStyle(fontSize: 18),
-           ),
-style: ElevatedButton.styleFrom(
-   backgroundColor: Colors.green[700],
-             foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                       ),
-                      ),
-                   ),
-                 ),
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                onPressed: _isLoading ? null : _enregistrer,
+                icon: _isLoading
+                    ? const CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2)
+                    : const Icon(Icons.check_circle),
+                label: Text(
+                  _isLoading
+                      ? "Enregistrement..."
+                      : "Enregistrer le nouveau-né",
+                  style: const TextStyle(fontSize: 18),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green[700],
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
           ],
         ),
       ),
