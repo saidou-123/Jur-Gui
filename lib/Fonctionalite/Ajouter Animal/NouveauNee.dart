@@ -382,9 +382,12 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
                       : "Enregistrer le nouveau-né",
                   style: const TextStyle(fontSize: 18),
                 ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green[700],
-                  foregroundColor: Colors.white,
+                 style: ElevatedButton.styleFrom(
+                   backgroundColor: Colors.green[700],
+                   foregroundColor: Colors.white,
+                   shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                   ),
                 ),
               ),
             ),
