@@ -1,4 +1,3 @@
-import 'package:depart/pages/connect.dart';
 import 'package:depart/pages/connexion.dart';
 import 'package:depart/widgets/couleur.dart';
 // import 'package:depart/widgets/inputs.dart'; // On n'utilise plus
@@ -191,7 +190,7 @@ class _InscriptionState extends State<Inscription> {
                             onTap: () {
                               Navigator.of(context).pushReplacement(
                                 MaterialPageRoute(
-                                  builder: (context) => const Connect(), // 🔴 Doit être 'Connect'
+                                  builder: (context) => const Connexion(), // 🔴 Doit être 'Connect'
                                 ),
                               );
                             },

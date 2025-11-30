@@ -51,7 +51,7 @@ class _AnimalAchateState extends State<AnimalAchate> {
   }
 
   // ----------------------------------------------------------
-  // 🟢 INITIALISATION REALTIME SUPABASE
+  // 🟢 REALTIME SUPABASE
   // ----------------------------------------------------------
   Future<void> _initializeRealtime() async {
     if (!mounted) return;
@@ -62,7 +62,7 @@ class _AnimalAchateState extends State<AnimalAchate> {
       await Future.delayed(const Duration(milliseconds: 500));
 
       final channelName = 'rfid_scanner_${DateTime.now().millisecondsSinceEpoch}';
-
+      
       _rfidChannel = Supabase.instance.client.channel(channelName);
 
       _rfidChannel!
@@ -71,15 +71,26 @@ class _AnimalAchateState extends State<AnimalAchate> {
             schema: 'public',
             table: 'rfid_scans',
             callback: (payload) {
-              debugPrint("⚡ PAYLOAD: $payload");
+              debugPrint("⚡ PAYLOAD REÇU = $payload");
 
-              if (payload.newRecord.isEmpty) return;
+              if (payload.newRecord.isEmpty) {
+                debugPrint("⚠️ Payload vide, ignoré");
+                return;
+              }
+
+              if (!payload.newRecord.containsKey('uid')) {
+                debugPrint("⚠️ Pas de clé 'uid' dans le payload");
+                return;
+              }
 
               final uid = payload.newRecord['uid']?.toString();
+              
+              if (uid == null || uid.isEmpty) {
+                debugPrint("⚠️ UID null ou vide");
+                return;
+              }
 
-              if (uid == null || uid.isEmpty) return;
-
-              debugPrint("🟢 UID détecté = $uid");
+              debugPrint("🟢 UID SCANNÉ = $uid");
 
               if (mounted) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -89,7 +100,7 @@ class _AnimalAchateState extends State<AnimalAchate> {
             },
           )
           .subscribe((status, [error]) {
-            debugPrint("📡 Realtime status = $status");
+            debugPrint("📡 Canal status = $status");
 
             if (!mounted) return;
 
@@ -98,16 +109,20 @@ class _AnimalAchateState extends State<AnimalAchate> {
             });
 
             if (status == RealtimeSubscribeStatus.subscribed) {
+              debugPrint("✅ Canal Realtime connecté");
               _showSnackBar("Système RFID connecté", Colors.green);
             } else if (status == RealtimeSubscribeStatus.closed) {
+              debugPrint("🔴 Canal Realtime fermé");
               _showSnackBar("Connexion RFID perdue", Colors.orange);
             } else if (error != null) {
-              _showSnackBar("Erreur RFID: ${error.toString()}", Colors.red);
+              debugPrint("❌ Erreur Realtime : $error");
             }
           });
     } catch (e) {
-      debugPrint("❌ Erreur Realtime : $e");
-      _showSnackBar("Erreur Realtime: ${e.toString()}", Colors.red);
+      debugPrint("❌ ERREUR Realtime : $e");
+      if (mounted) {
+        _showSnackBar("Erreur Realtime: ${e.toString()}", Colors.red);
+      }
     }
   }
 
@@ -123,8 +138,15 @@ class _AnimalAchateState extends State<AnimalAchate> {
     }
   }
 
-  void _onTagDetected(String uid) {
+  // ----------------------------------------------------------
+  // 🔍 DÉTECTION DU TAG AVEC VÉRIFICATION DE DOUBLON
+  // ----------------------------------------------------------
+  Future<void> _onTagDetected(String uid) async {
     if (!mounted) return;
+
+    debugPrint("════════════════════════════════════");
+    debugPrint("🏷️  NOUVEAU TAG DÉTECTÉ : $uid");
+    debugPrint("════════════════════════════════════");
 
     setState(() {
       _tagRFID = uid;
@@ -132,6 +154,198 @@ class _AnimalAchateState extends State<AnimalAchate> {
     });
 
     _showSnackBar("Tag RFID détecté : $uid", Colors.blue);
+
+    // 🔍 Vérifier immédiatement si le tag existe déjà
+    try {
+      debugPrint("🔍 Démarrage de la vérification de doublon...");
+      
+      // ✅ CORRECTION: orthographe correcte de "provenance"
+      final result = await Supabase.instance.client
+          .from('animal_acheter')
+          .select('id, nom, race, sexe, provenance, tag_rfid')
+          .eq('tag_rfid', uid);
+
+      debugPrint("📊 Résultat de la requête : $result");
+      debugPrint("📊 Nombre de résultats : ${result.length}");
+
+      if (result.isNotEmpty) {
+        final existing = result.first;
+        debugPrint("⚠️⚠️⚠️ DOUBLON DÉTECTÉ ! ⚠️⚠️⚠️");
+        debugPrint("Animal existant : ${existing['nom']}");
+        debugPrint("════════════════════════════════════");
+        
+        if (mounted) {
+          // Afficher un avertissement immédiat
+          _showSnackBar(
+            "⚠️ ATTENTION ! Tag déjà utilisé par : ${existing['nom']}",
+            Colors.orange,
+          );
+          
+          // Afficher le dialogue après un court délai
+          Future.delayed(const Duration(milliseconds: 800), () {
+            if (mounted) {
+              _showDuplicateDialog(existing);
+            }
+          });
+        }
+      } else {
+        debugPrint("✅ Tag RFID disponible - Aucun doublon");
+        debugPrint("════════════════════════════════════");
+      }
+    } catch (e, stackTrace) {
+      debugPrint("❌❌❌ ERREUR lors de la vérification !");
+      debugPrint("Erreur : $e");
+      debugPrint("Stack trace : $stackTrace");
+      debugPrint("════════════════════════════════════");
+    }
+  }
+
+  // ----------------------------------------------------------
+  // 📋 DIALOGUE D'ALERTE DOUBLON
+  // ----------------------------------------------------------
+  Future<void> _showDuplicateDialog(Map<String, dynamic> existing) async {
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          icon: const Icon(
+            Icons.warning_amber_rounded,
+            color: Colors.orange,
+            size: 64,
+          ),
+          title: const Text(
+            "⚠️ Tag RFID déjà utilisé",
+            style: TextStyle(fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Ce tag RFID est déjà attribué à un animal :",
+                style: TextStyle(fontSize: 16),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200, width: 2),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildInfoRow(
+                      Icons.pets,
+                      "Nom",
+                      existing['nom'] ?? 'N/A',
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoRow(
+                      Icons.agriculture,
+                      "Race",
+                      existing['race'] ?? 'N/A',
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoRow(
+                      Icons.wc,
+                      "Sexe",
+                      existing['sexe'] ?? 'N/A',
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoRow(
+                      Icons.nfc,
+                      "Tag RFID",
+                      existing['tag_rfid'] ?? 'N/A',
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoRow(
+                      Icons.location_on,
+                      "Provenance",
+                      existing['provenance'] ?? 'N/A',
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.red, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Veuillez utiliser un autre tag RFID",
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () {
+                Navigator.of(context).pop();
+                setState(() {
+                  _tagRFID = null;
+                  _uidController.clear();
+                });
+              },
+              icon: const Icon(Icons.nfc),
+              label: const Text("Scanner un autre tag"),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.blue,
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text("OK, compris"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildInfoRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: Colors.orange.shade700),
+        const SizedBox(width: 8),
+        Text(
+          "$label : ",
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(fontSize: 14),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
   }
 
   // ----------------------------------------------------------
@@ -141,9 +355,8 @@ class _AnimalAchateState extends State<AnimalAchate> {
     if (!mounted) return;
 
     _showSnackBar("Reconnexion en cours...", Colors.orange);
-
     setState(() => _isLoading = true);
-
+    
     _unsubscribeRealtime();
     await Future.delayed(const Duration(milliseconds: 500));
     await _initializeRealtime();
@@ -151,9 +364,6 @@ class _AnimalAchateState extends State<AnimalAchate> {
     if (mounted) setState(() => _isLoading = false);
   }
 
-  // ----------------------------------------------------------
-  // UTILITAIRE : SnackBar
-  // ----------------------------------------------------------
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
 
@@ -258,7 +468,7 @@ class _AnimalAchateState extends State<AnimalAchate> {
   }
 
   // ----------------------------------------------------------
-  // ENREGISTRER
+  // 💾 ENREGISTRER AVEC DÉTECTION DE DOUBLONS
   // ----------------------------------------------------------
   Future<void> _enregistrer() async {
     if (!mounted) return;
@@ -269,18 +479,44 @@ class _AnimalAchateState extends State<AnimalAchate> {
         _selectedSexe == null ||
         _pickedFile == null ||
         _tagRFID == null) {
-      _showSnackBar("Veuillez remplir tous les champs", Colors.red);
+      _showSnackBar(
+        "⚠️ Veuillez remplir tous les champs et scanner un tag RFID",
+        Colors.red,
+      );
       return;
     }
 
     setState(() => _isLoading = true);
 
     try {
+      debugPrint("🔍 Vérification finale du tag RFID : $_tagRFID");
+      
+      final existing = await Supabase.instance.client
+          .from('animal_acheter')
+          .select('id, nom, race, tag_rfid, provenance')
+          .eq('tag_rfid', _tagRFID!)
+          .maybeSingle();
+
+      if (existing != null) {
+        debugPrint("❌ Tag RFID déjà utilisé : ${existing['nom']}");
+        
+        if (mounted) {
+          setState(() => _isLoading = false);
+          await _showDuplicateDialog(existing);
+        }
+        return;
+      }
+
+      debugPrint("✅ Tag RFID disponible, insertion en cours...");
+
       final url = await _uploadImage(_pickedFile!);
+      if (url == null) {
+        throw Exception("Erreur lors de l'upload de l'image");
+      }
 
-      if (url == null) throw Exception("Erreur upload image");
+      debugPrint("✅ Image uploadée : $url");
 
-      await Supabase.instance.client.from('nouveaux_nee').insert({
+      await Supabase.instance.client.from('animal_acheter').insert({
         'nom': _nomController.text.trim(),
         'provenance': _provenanceController.text.trim(),
         'race': _selectedRace,
@@ -291,12 +527,21 @@ class _AnimalAchateState extends State<AnimalAchate> {
         'created_at': DateTime.now().toIso8601String(),
       });
 
-      _showSnackBar("Animal enregistré avec succès !", Colors.green);
-      _resetForm();
+      debugPrint("✅ Animal acheté enregistré avec succès !");
+
+      if (mounted) {
+        _showSnackBar("✅ Animal acheté enregistré avec succès !", Colors.green);
+        _resetForm();
+      }
     } catch (e) {
-      _showSnackBar("Erreur : ${e.toString()}", Colors.red);
+      debugPrint("❌ Erreur lors de l'enregistrement : $e");
+      if (mounted) {
+        _showSnackBar("❌ Erreur : ${e.toString()}", Colors.red);
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -304,7 +549,6 @@ class _AnimalAchateState extends State<AnimalAchate> {
     _nomController.clear();
     _provenanceController.clear();
     _uidController.clear();
-
     setState(() {
       _selectedRace = null;
       _selectedSexe = null;
@@ -320,7 +564,7 @@ class _AnimalAchateState extends State<AnimalAchate> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Jur Gui 4.0 - Animal-Ajout"),
+        title: const Text("Jur Gui 4.0 - Animal Acheté"),
         backgroundColor: Colors.green[700],
         actions: [
           IconButton(
@@ -355,7 +599,7 @@ class _AnimalAchateState extends State<AnimalAchate> {
                   _buildTextFormField(
                     _provenanceController,
                     "Provenance",
-                    Icons.agriculture,
+                    Icons.location_on,
                   ),
                   const SizedBox(height: 12),
                   _buildRaceDropdown(),
@@ -465,6 +709,13 @@ class _AnimalAchateState extends State<AnimalAchate> {
         suffixIcon: _tagRFID != null
             ? const Icon(Icons.check_circle, color: Colors.green)
             : const Icon(Icons.pending, color: Colors.orange),
+        helperText: _tagRFID == null 
+            ? "Scannez un tag RFID pour continuer" 
+            : "Tag RFID détecté",
+        helperStyle: TextStyle(
+          color: _tagRFID == null ? Colors.grey : Colors.green,
+          fontWeight: FontWeight.bold,
+        ),
       ),
       style: const TextStyle(
         fontWeight: FontWeight.bold,

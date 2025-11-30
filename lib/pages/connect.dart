@@ -1,8 +1,7 @@
 import 'package:depart/Fonctionalite/Ajouter%20Animal/AjouterAnimal.dart';
 import 'package:depart/Fonctionalite/Chaleur/Chaleur.dart';
 import 'package:depart/Fonctionalite/Accouplemaent/Accouplement.dart';
-import 'package:depart/Fonctionalite/Mon_Troupeau.dart';
-import 'package:depart/Fonctionalite/transport.dart';
+import 'package:depart/Fonctionalite/Mon%20Troupeau/AnimalListPage.dart';
 import 'package:depart/widgets/OptionCercle.dart';
 import 'package:depart/widgets/optioncard.dart';
 import 'package:flutter/material.dart';
@@ -69,7 +68,7 @@ class Connect extends StatelessWidget {
                 OptionCercle(
                   image: 'assets/image/img6.png',
                   label: "Mon Troupeau",
-                  route: const Restaurant(),
+                  route: const AnimalListPage (),
                 ),
                 // Ajoute un espacement fixe entre les cartes
                 SizedBox(width: 12),
@@ -156,7 +155,7 @@ class Connect extends StatelessWidget {
               OptionCard(
                 image: 'assets/image/img6.png',
                 label: "Mon Troupea",
-                route: const Restaurant(),
+                route: const AnimalListPage (),
               ),
               OptionCard(
                 image: 'assets/image/img10.png',

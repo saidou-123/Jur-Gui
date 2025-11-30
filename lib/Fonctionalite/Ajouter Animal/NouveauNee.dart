@@ -137,9 +137,7 @@ class _NouveauNeePageState extends State<NouveauNeePage> {
 
   // ----------------------------------------------------------
   // 🔍 DÉTECTION DU TAG AVEC VÉRIFICATION DE DOUBLON
-  // ----------------------------------------------------------// ----------------------------------------------------------
-// 🔍 DÉTECTION DU TAG AVEC VÉRIFICATION DE DOUBLON
-// ----------------------------------------------------------
+  // ----------------------------------------------------------// 
 Future<void> _onTagDetected(String uid) async {
   if (!mounted) return;
 
