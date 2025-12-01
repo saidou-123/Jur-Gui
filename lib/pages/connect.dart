@@ -1,7 +1,8 @@
 import 'package:depart/Fonctionalite/Ajouter%20Animal/AjouterAnimal.dart';
+import 'package:depart/Fonctionalite/AnimalInfoRFID/AnimalInfoRFIDPage.dart';
 import 'package:depart/Fonctionalite/Chaleur/Chaleur.dart';
 import 'package:depart/Fonctionalite/Accouplemaent/Accouplement.dart';
-import 'package:depart/Fonctionalite/Mon%20Troupeau/AnimalListPage.dart';
+import 'package:depart/Fonctionalite/Mon%20Troupeau/modfierAnimal/AnimalListPage.dart';
 import 'package:depart/widgets/OptionCercle.dart';
 import 'package:depart/widgets/optioncard.dart';
 import 'package:flutter/material.dart';
@@ -68,7 +69,7 @@ class Connect extends StatelessWidget {
                 OptionCercle(
                   image: 'assets/image/img6.png',
                   label: "Mon Troupeau",
-                  route: const AnimalListPage (),
+                  route: const AnimalListPage(),
                 ),
                 // Ajoute un espacement fixe entre les cartes
                 SizedBox(width: 12),
@@ -176,8 +177,8 @@ class Connect extends StatelessWidget {
               ),
               OptionCard(
                 image: 'assets/image/img14.png',
-                label: 'Notificalition ',
-                route: const Chaleur(),
+                label: 'Scan ',
+                route: const AnimalInfoRFIDPage(),
               ),
             ],
           ),
