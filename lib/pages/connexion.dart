@@ -1,60 +1,81 @@
-// 🔴 NOUVEAU NOM DE CLASSE POUR CORRESPONDRE À main.dart
-import 'package:depart/pages/connect.dart';
-import 'package:depart/pages/inscription.dart' show Inscription;
-import 'package:depart/widgets/carre.dart' show Carre;
+import 'package:depart/pages/Interface/interfaceElevaur.dart';
+import 'package:depart/pages/Interface/interfaceVeterinaire.dart';
+import 'package:depart/pages/inscription.dart';
 import 'package:depart/widgets/couleur.dart';
 import 'package:flutter/material.dart';
-
-// 🟢 IMPORTS AJOUTÉS
 import 'package:supabase_flutter/supabase_flutter.dart';
-// Assurez-vous que le chemin est correct
 
-// 🔴 J'ai renommé la classe en 'Connect' pour correspondre à votre main.dart
 class Connexion extends StatefulWidget {
   const Connexion({super.key});
 
   @override
-  State<Connexion> createState() => _ConnectState();
+  State<Connexion> createState() => _ConnexionState();
 }
 
-// 🔴 J'ai renommé la classe en '_ConnectState'
-class _ConnectState extends State<Connexion> {
-  // 🟢 STATE AJOUTÉ
+class _ConnexionState extends State<Connexion> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
-  final supabase = Supabase.instance.client; // 🟢 Client Supabase
+  final supabase = Supabase.instance.client;
 
   @override
   void dispose() {
-    // 🟢 Bonne pratique
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
-  // 🟢 FONCTION DE CONNEXION AJOUTÉE
   Future<void> _signIn() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
+    
     try {
+      // 1. Authentification
       final response = await supabase.auth.signInWithPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
 
-      // Si la connexion réussit, on navigue
-      if (response.user != null && mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const Connect()),
-        );
+      if (response.user != null) {
+        // 2. Récupérer le rôle de l'utilisateur
+        final userData = await supabase
+            .from('users')
+            .select('role')
+            .eq('id', response.user!.id)
+            .maybeSingle();
+
+        if (userData == null) {
+          // Solution de secours : récupérer depuis user_metadata
+          final role = response.user!.userMetadata?['role'] as String? ?? 'eleveur';
+          
+          // Créer l'entrée manquante
+          await supabase.from('users').insert({
+            'id': response.user!.id,
+            'email': response.user!.email,
+            'nom': response.user!.userMetadata?['nom'] ?? 'Non renseigné',
+            'prenom': response.user!.userMetadata?['prenom'] ?? 'Non renseigné',
+            'role': role,
+          });
+          
+          _navigateByRole(role);
+        } else {
+          final role = userData['role'] as String;
+          _navigateByRole(role);
+        }
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("❌ ${e.message}"),
+          backgroundColor: Colors.red,
+        ));
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text("Erreur de connexion : ${e.toString()}"),
+          content: Text("❌ Erreur : ${e.toString()}"),
           backgroundColor: Colors.red,
         ));
       }
@@ -62,6 +83,20 @@ class _ConnectState extends State<Connexion> {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  void _navigateByRole(String role) {
+    if (!mounted) return;
+    
+    if (role == 'eleveur') {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const interfaceElevaur()),
+      );
+    } else if (role == 'veterinaire') {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const interfaceVeterinaire()),
+      );
     }
   }
 
@@ -85,21 +120,19 @@ class _ConnectState extends State<Connexion> {
                   ),
                 ),
                 Text(
-                  "Bienvenue a nouveau sur votre application ",
+                  "Bienvenue sur Jur Gui 4.0",
                   style: TextStyle(color: Couleur.PremierColor),
                 ),
-                const SizedBox(height: 10),
-                // 🟢 UTILISATION D'UN FORM ET DE TEXTFORMFIELDS
+                const SizedBox(height: 20),
                 Form(
-                  key: _formKey, // 🟢 Clé de formulaire
+                  key: _formKey,
                   child: Column(
                     children: [
-                      // 🟢 Remplacement de Inputs par TextFormField
                       TextFormField(
                         controller: _emailController,
                         decoration: InputDecoration(
                           labelText: "Email",
-                          hintText: " Votre Adresse Email ",
+                          hintText: "votre.email@example.com",
                           prefixIcon: Icon(Icons.email, color: Couleur.PremierColor),
                           border: const OutlineInputBorder(),
                         ),
@@ -112,13 +145,12 @@ class _ConnectState extends State<Connexion> {
                         },
                       ),
                       const SizedBox(height: 15),
-                      // 🟢 Remplacement de Inputs par TextFormField
                       TextFormField(
                         controller: _passwordController,
-                        obscureText: true, // 🟢 Gère le mot de passe
+                        obscureText: true,
                         decoration: InputDecoration(
-                          labelText: "Mots De Passe",
-                          hintText: "Votre Mots De Passe",
+                          labelText: "Mot de passe",
+                          hintText: "Votre mot de passe",
                           prefixIcon: Icon(Icons.lock, color: Couleur.PremierColor),
                           border: const OutlineInputBorder(),
                         ),
@@ -134,35 +166,17 @@ class _ConnectState extends State<Connexion> {
                         width: double.infinity,
                         height: 50,
                         child: ElevatedButton(
-                          // 🟢 Logique pour le bouton
                           onPressed: _isLoading ? null : _signIn,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Couleur.PremierColor,
+                          ),
                           child: _isLoading
                               ? const CircularProgressIndicator(color: Colors.white)
-                              : Text(
-                                  "Se Connecter",
-                                  style: TextStyle(color: Couleur.PremierColor),
+                              : const Text(
+                                  "Se connecter",
+                                  style: TextStyle(color: Colors.white, fontSize: 16),
                                 ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: const [
-                          Expanded(child: Divider(thickness: 0.5)),
-                          Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 10),
-                            child: Text("Ou continuer avec "),
-                          ),
-                          Expanded(child: Divider(thickness: 0.5)),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          Carre(path: "assets/image/img13.png"),
-                          SizedBox(width: 10),
-                          Carre(path: "assets/image/img13.png"),
-                        ],
                       ),
                       const SizedBox(height: 20),
                       Row(
@@ -178,7 +192,7 @@ class _ConnectState extends State<Connexion> {
                               );
                             },
                             child: const Text(
-                              "Inscrivez Vous",
+                              " Inscrivez-vous",
                               style: TextStyle(
                                 color: Colors.red,
                                 fontWeight: FontWeight.bold,

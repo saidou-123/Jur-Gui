@@ -8,8 +8,8 @@ import 'package:depart/widgets/optioncard.dart';
 import 'package:flutter/material.dart';
 import 'package:depart/widgets/couleur.dart';
 
-class Connect extends StatelessWidget {
-  const Connect({super.key});
+class interfaceElevaur extends StatelessWidget {
+  const interfaceElevaur({super.key});
 
   @override
   Widget build(BuildContext context) {
