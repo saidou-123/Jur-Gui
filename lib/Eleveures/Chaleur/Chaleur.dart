@@ -1,4 +1,4 @@
-import 'package:depart/Fonctionalite/Chaleur/FicheBrebisPage.dart';
+import 'package:depart/Eleveures/Chaleur/FicheBrebisPage.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 

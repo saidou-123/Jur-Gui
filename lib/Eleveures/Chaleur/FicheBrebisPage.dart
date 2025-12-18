@@ -1,4 +1,4 @@
-import 'package:depart/Fonctionalite/Chaleur/EnregistrerChaleurPage.dart';
+import 'package:depart/Eleveures/Chaleur/EnregistrerChaleurPage.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 // ============================================================
@@ -84,18 +84,6 @@ class _FicheBrebisPageState extends State<FicheBrebisPage> {
         setState(() => _isLoading = false);
       }
     }
-  }
-
-  void _showSnackBar(String message, Color color) {
-    if (!mounted) return;
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        duration: const Duration(seconds: 2),
-      ),
-    );
   }
 
   @override

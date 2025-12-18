@@ -73,7 +73,7 @@ class _InscriptionState extends State<Inscription> {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text("✅ Inscription réussie ! Vérifiez votre email pour confirmer votre compte."),
           backgroundColor: Colors.green,
-          duration: Duration(seconds: 5),
+          duration: Duration(seconds: 10),
         ));
         
         Navigator.of(context).pushReplacement(

@@ -1,6 +1,6 @@
-import 'package:depart/Fonctionalite/Ajouter%20Animal/AnimalAchate.dart';
+import 'package:depart/Eleveures/Ajouter%20Animal/AnimalAchate.dart';
+import 'package:depart/Eleveures/Ajouter%20Animal/NouveauNee.dart';
 import 'package:flutter/material.dart';
-import 'package:depart/Fonctionalite/Ajouter%20Animal/NouveauNee.dart';
 import 'package:depart/widgets/optioncard.dart';
 
 class AjouterAnimal extends StatelessWidget {

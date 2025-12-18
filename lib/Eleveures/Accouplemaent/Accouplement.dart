@@ -8,7 +8,6 @@ class Accouplement extends StatefulWidget {
 }
 
 class _AjouteranimalState extends State<Accouplement> {
-  String? _selectedbrebis;
   String? _selectedRace;
 
   DateTime? _selectedDate;
@@ -86,7 +85,6 @@ class _AjouteranimalState extends State<Accouplement> {
                     ],
                     onChanged: (value) {
                       setState(() {
-                        _selectedbrebis = value;
                       });
                     },
                   ),

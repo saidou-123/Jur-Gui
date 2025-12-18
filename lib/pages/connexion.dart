@@ -1,5 +1,5 @@
 import 'package:depart/pages/Interface/interfaceElevaur.dart';
-import 'package:depart/pages/Interface/interfaceVeterinaire.dart';
+import 'package:depart/pages/Interface/interfaceVeterinaire/interfaceVeterinaire.dart';
 import 'package:depart/pages/inscription.dart';
 import 'package:depart/widgets/couleur.dart';
 import 'package:flutter/material.dart';

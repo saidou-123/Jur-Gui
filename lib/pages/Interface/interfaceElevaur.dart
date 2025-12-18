@@ -1,12 +1,13 @@
-import 'package:depart/Fonctionalite/Ajouter%20Animal/AjouterAnimal.dart';
-import 'package:depart/Fonctionalite/AnimalInfoRFID/AnimalInfoRFIDPage.dart';
-import 'package:depart/Fonctionalite/Chaleur/Chaleur.dart';
-import 'package:depart/Fonctionalite/Accouplemaent/Accouplement.dart';
-import 'package:depart/Fonctionalite/Mon%20Troupeau/modfierAnimal/AnimalListPage.dart';
+import 'package:depart/Eleveures/Accouplemaent/Accouplement.dart';
+import 'package:depart/Eleveures/Ajouter%20Animal/AjouterAnimal.dart';
+import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDPage.dart';
+import 'package:depart/Eleveures/Chaleur/Chaleur.dart';
 import 'package:depart/widgets/OptionCercle.dart';
 import 'package:depart/widgets/optioncard.dart';
 import 'package:flutter/material.dart';
 import 'package:depart/widgets/couleur.dart';
+
+import '../../Eleveures/Mon Troupeau/ModfierAnimal/AnimalListPage.dart';
 
 class interfaceElevaur extends StatelessWidget {
   const interfaceElevaur({super.key});
