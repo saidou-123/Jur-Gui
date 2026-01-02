@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ============================================================
-// 1. HISTORIQUE MÉDICAL - VERSION ÉLEVEUR (LECTURE SEULE)
+// HISTORIQUE MÉDICAL - VERSION ÉLEVEUR (LECTURE SEULE)
+// VERSION CORRIGÉE - Compatible avec votre structure users
 // ============================================================
 class HistoriqueMedicalEleveur extends StatefulWidget {
   const HistoriqueMedicalEleveur({super.key});
@@ -34,48 +35,182 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
 
       List<Map<String, dynamic>> historique = [];
 
-      // Charger consultations de MES animaux uniquement
-      // final consultations = await supabase
-      //     .from('consultations')
-      //     .select('''
-      //       *,
-      //       nouveaux_nee!inner(nom, race, user_id),
-      //       animal_acheter!inner(nom, race, user_id)
-      //     ''')
-      //     .or('nouveaux_nee.user_id.eq.$userId,animal_acheter.user_id.eq.$userId')
-      //     .order('date_consultation', ascending: false);
+      // ========== CHARGER CONSULTATIONS ==========
+      final consultationsResponse = await supabase
+          .from('consultations')
+          .select('*')
+          .order('date_consultation', ascending: false);
 
-      // Données fictives pour démonstration
-      historique = [
-        {
-          'type': 'consultation',
-          'date': '2024-12-15',
-          'animal_nom': 'Bella',
-          'titre': 'Consultation de routine',
-          'description': 'Examen général - RAS',
-          'veterinaire': 'Dr. Diop',
-          'diagnostic': 'Bonne santé générale',
-          'traitement': 'Aucun traitement nécessaire',
-        },
-        {
-          'type': 'vaccination',
-          'date': '2024-12-10',
-          'animal_nom': 'Max',
-          'titre': 'Vaccination antirabique',
-          'description': 'Première injection - Rappel dans 1 an',
-          'veterinaire': 'Dr. Diop',
-        },
-        {
-          'type': 'consultation',
-          'date': '2024-12-05',
-          'animal_nom': 'Luna',
-          'titre': 'Traitement parasitaire',
-          'description': 'Vermifuge administré',
-          'veterinaire': 'Dr. Diop',
-          'diagnostic': 'Parasites intestinaux',
-          'traitement': 'Vermifuge - 1 dose',
-        },
-      ];
+      for (var consultation in consultationsResponse) {
+        try {
+          String animalNom = "Animal inconnu";
+          String animalRace = "";
+          
+          // Récupérer les infos de l'animal selon la source
+          if (consultation['source'] == 'nee') {
+            final animalData = await supabase
+                .from('nouveaux_nee')
+                .select('nom, race')
+                .eq('id', consultation['animal_id'])
+                .maybeSingle();
+            
+            if (animalData != null) {
+              animalNom = animalData['nom'] ?? 'Animal inconnu';
+              animalRace = animalData['race'] ?? '';
+            }
+          } else if (consultation['source'] == 'achete') {
+            final animalData = await supabase
+                .from('animal_acheter')
+                .select('nom, race')
+                .eq('id', consultation['animal_id'])
+                .maybeSingle();
+            
+            if (animalData != null) {
+              animalNom = animalData['nom'] ?? 'Animal inconnu';
+              animalRace = animalData['race'] ?? '';
+            }
+          }
+
+          // Récupérer le nom du vétérinaire (gère plusieurs formats possibles)
+          String veterinaireName = "Dr. Inconnu";
+          try {
+            final vetData = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', consultation['veterinaire_id'])
+                .maybeSingle();
+            
+            if (vetData != null) {
+              // Essayer plusieurs colonnes possibles
+              veterinaireName = vetData['nom_complet'] ?? 
+                                vetData['full_name'] ?? 
+                                vetData['name'] ??
+                                (vetData['prenom'] != null && vetData['nom'] != null 
+                                  ? '${vetData['prenom']} ${vetData['nom']}'
+                                  : vetData['email']?.split('@')[0] ?? 'Dr. Inconnu');
+            }
+          } catch (e) {
+            debugPrint("Erreur récupération vétérinaire: $e");
+          }
+
+          // Formater la date
+          String dateFormatted = "Date inconnue";
+          try {
+            final dateTime = DateTime.parse(consultation['date_consultation'].toString());
+            dateFormatted = "${dateTime.day.toString().padLeft(2, '0')}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.year}";
+          } catch (e) {
+            debugPrint("Erreur format date: $e");
+          }
+
+          historique.add({
+            'type': 'consultation',
+            'date': dateFormatted,
+            'date_sort': consultation['date_consultation'],
+            'animal_nom': animalNom,
+            'animal_race': animalRace,
+            'titre': consultation['motif'] ?? 'Consultation',
+            'description': consultation['examen_clinique'] ?? 'Examen général',
+            'veterinaire': veterinaireName,
+            'diagnostic': consultation['diagnostic'] ?? 'Non spécifié',
+            'traitement': consultation['traitement'] ?? 'Non spécifié',
+            'observations': consultation['observations'] ?? '',
+          });
+        } catch (e) {
+          debugPrint("Erreur traitement consultation: $e");
+        }
+      }
+
+      // ========== CHARGER VACCINATIONS ==========
+      final vaccinationsResponse = await supabase
+          .from('vaccinations')
+          .select('*')
+          .order('date_vaccination', ascending: false);
+
+      for (var vaccination in vaccinationsResponse) {
+        try {
+          String animalNom = "Animal inconnu";
+          String animalRace = "";
+          
+          if (vaccination['source'] == 'nee') {
+            final animalData = await supabase
+                .from('nouveaux_nee')
+                .select('nom, race')
+                .eq('id', vaccination['animal_id'])
+                .maybeSingle();
+            
+            if (animalData != null) {
+              animalNom = animalData['nom'] ?? 'Animal inconnu';
+              animalRace = animalData['race'] ?? '';
+            }
+          } else if (vaccination['source'] == 'achete') {
+            final animalData = await supabase
+                .from('animal_acheter')
+                .select('nom, race')
+                .eq('id', vaccination['animal_id'])
+                .maybeSingle();
+            
+            if (animalData != null) {
+              animalNom = animalData['nom'] ?? 'Animal inconnu';
+              animalRace = animalData['race'] ?? '';
+            }
+          }
+
+          // Récupérer le nom du vétérinaire (gère plusieurs formats)
+          String veterinaireName = "Dr. Inconnu";
+          try {
+            final vetData = await supabase
+                .from('users')
+                .select('*')
+                .eq('id', vaccination['veterinaire_id'])
+                .maybeSingle();
+            
+            if (vetData != null) {
+              veterinaireName = vetData['nom_complet'] ?? 
+                                vetData['full_name'] ?? 
+                                vetData['name'] ??
+                                (vetData['prenom'] != null && vetData['nom'] != null 
+                                  ? '${vetData['prenom']} ${vetData['nom']}'
+                                  : vetData['email']?.split('@')[0] ?? 'Dr. Inconnu');
+            }
+          } catch (e) {
+            debugPrint("Erreur récupération vétérinaire: $e");
+          }
+
+          // Formater les dates
+          String dateVaccination = _formatDate(vaccination['date_vaccination'].toString());
+          String dateRappel = vaccination['date_rappel'] != null 
+              ? _formatDate(vaccination['date_rappel'].toString())
+              : 'Aucun rappel';
+
+          historique.add({
+            'type': 'vaccination',
+            'date': dateVaccination,
+            'date_sort': vaccination['date_vaccination'],
+            'animal_nom': animalNom,
+            'animal_race': animalRace,
+            'titre': 'Vaccination ${vaccination['nom_vaccin']}',
+            'description': 'Rappel prévu le $dateRappel',
+            'veterinaire': veterinaireName,
+            'nom_vaccin': vaccination['nom_vaccin'],
+            'date_rappel': dateRappel,
+            'lot': vaccination['lot'] ?? 'N/A',
+            'observations': vaccination['observations'] ?? '',
+          });
+        } catch (e) {
+          debugPrint("Erreur traitement vaccination: $e");
+        }
+      }
+
+      // Trier par date (plus récent en premier)
+      historique.sort((a, b) {
+        try {
+          final dateA = DateTime.parse(a['date_sort'].toString());
+          final dateB = DateTime.parse(b['date_sort'].toString());
+          return dateB.compareTo(dateA);
+        } catch (e) {
+          return 0;
+        }
+      });
 
       if (mounted) {
         setState(() {
@@ -87,13 +222,35 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
       debugPrint("Erreur chargement historique: $e");
       if (mounted) {
         setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Erreur de chargement: ${e.toString()}"),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
       }
+    }
+  }
+
+  String _formatDate(String dateString) {
+    try {
+      final dateTime = DateTime.parse(dateString);
+      return "${dateTime.day.toString().padLeft(2, '0')}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.year}";
+    } catch (e) {
+      return dateString;
     }
   }
 
   List<Map<String, dynamic>> get _historiqueFiltre {
     if (_filtre == 'Tout') return _historique;
-    return _historique.where((item) => item['type'] == _filtre.toLowerCase()).toList();
+    if (_filtre == 'Consultations') {
+      return _historique.where((item) => item['type'] == 'consultation').toList();
+    }
+    if (_filtre == 'Vaccinations') {
+      return _historique.where((item) => item['type'] == 'vaccination').toList();
+    }
+    return _historique;
   }
 
   @override
@@ -102,10 +259,13 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
       appBar: AppBar(
         title: const Text("Historique Médical"),
         backgroundColor: Colors.green[700],
+        foregroundColor: Colors.white,
+        elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _chargerHistorique,
+            tooltip: "Actualiser",
           ),
         ],
       ),
@@ -136,6 +296,24 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
 
           // Filtres
           _buildFilterChips(),
+
+          // Compteur
+          if (!_isLoading && _historiqueFiltre.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Text(
+                    "${_historiqueFiltre.length} enregistrement${_historiqueFiltre.length > 1 ? 's' : ''}",
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           // Liste historique
           Expanded(
@@ -208,6 +386,10 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: InkWell(
         onTap: () => _showDetailDialog(item),
         borderRadius: BorderRadius.circular(12),
@@ -227,11 +409,13 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
                     ),
                     child: Icon(icone, color: couleur, size: 24),
                   ),
-                  Container(
-                    width: 2,
-                    height: 40,
-                    color: couleur.withOpacity(0.3),
-                  ),
+                  if (_historiqueFiltre.indexOf(item) < _historiqueFiltre.length - 1)
+                    Container(
+                      width: 2,
+                      height: 40,
+                      margin: const EdgeInsets.only(top: 4),
+                      color: couleur.withOpacity(0.3),
+                    ),
                 ],
               ),
               const SizedBox(width: 16),
@@ -258,7 +442,7 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
-                            item['type'].toUpperCase(),
+                            item['type'] == 'consultation' ? 'CONSULTATION' : 'VACCINATION',
                             style: TextStyle(
                               fontSize: 10,
                               color: couleur,
@@ -277,12 +461,27 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      "🐑 ${item['animal_nom']}",
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[700],
-                      ),
+                    Row(
+                      children: [
+                        const Text("🐑 ", style: TextStyle(fontSize: 14)),
+                        Text(
+                          item['animal_nom'],
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[700],
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (item['animal_race'] != null && item['animal_race'].toString().isNotEmpty) ...[
+                          Text(
+                            " (${item['animal_race']})",
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -314,6 +513,15 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
   }
 
   Widget _buildEmptyState() {
+    String message;
+    if (_filtre == 'Consultations') {
+      message = "Aucune consultation enregistrée";
+    } else if (_filtre == 'Vaccinations') {
+      message = "Aucune vaccination enregistrée";
+    } else {
+      message = "Aucun historique médical";
+    }
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -321,12 +529,12 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
           Icon(Icons.medical_information, size: 80, color: Colors.grey[400]),
           const SizedBox(height: 16),
           Text(
-            "Aucun historique médical",
+            message,
             style: TextStyle(fontSize: 18, color: Colors.grey[600]),
           ),
           const SizedBox(height: 8),
           Text(
-            "Les consultations vétérinaires apparaîtront ici",
+            "Les soins vétérinaires apparaîtront ici",
             style: TextStyle(fontSize: 14, color: Colors.grey[500]),
           ),
         ],
@@ -354,103 +562,212 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(icone, color: couleur),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                item['titre'],
-                style: const TextStyle(fontSize: 18),
-              ),
-            ),
-          ],
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
         ),
-        content: SingleChildScrollView(
+        child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Bannière lecture seule
+              // En-tête
               Container(
-                padding: const EdgeInsets.all(8),
-                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[200]!, width: 1),
+                  color: couleur.withOpacity(0.1),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
+                  ),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.visibility, color: Colors.blue[700], size: 16),
-                    const SizedBox(width: 8),
+                    Icon(icone, color: couleur, size: 28),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        "Consultation uniquement",
+                        item['titre'],
                         style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue[900],
-                          fontWeight: FontWeight.w500,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: couleur,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Contenu
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Bannière lecture seule
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue[200]!, width: 1),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.visibility, color: Colors.blue[700], size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              "Consultation uniquement - Vous ne pouvez pas modifier ces informations",
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.blue[900],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    _buildDetailRow("Date", item['date'], Icons.calendar_today),
+                    _buildDetailRow("Animal", "${item['animal_nom']}${item['animal_race'] != null && item['animal_race'].toString().isNotEmpty ? ' (${item['animal_race']})' : ''}", Icons.pets),
+                    _buildDetailRow("Vétérinaire", item['veterinaire'], Icons.person),
+                    
+                    // Détails spécifiques aux consultations
+                    if (item['type'] == 'consultation') ...[
+                      if (item['diagnostic'] != null && item['diagnostic'].toString().isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        const Text(
+                          "Diagnostic :",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.green[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.green[200]!),
+                          ),
+                          child: Text(
+                            item['diagnostic'],
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ),
+                      ],
+                      
+                      if (item['traitement'] != null && item['traitement'].toString().isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        const Text(
+                          "Traitement :",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.orange[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.orange[200]!),
+                          ),
+                          child: Text(
+                            item['traitement'],
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ),
+                      ],
+                    ],
+
+                    // Détails spécifiques aux vaccinations
+                    if (item['type'] == 'vaccination') ...[
+                      const SizedBox(height: 12),
+                      _buildDetailRow("Vaccin", item['nom_vaccin'], Icons.medical_information),
+                      _buildDetailRow("Date rappel", item['date_rappel'], Icons.event_repeat),
+                      if (item['lot'] != null && item['lot'].toString() != 'N/A')
+                        _buildDetailRow("Numéro de lot", item['lot'], Icons.qr_code),
+                    ],
+                    
+                    // Observations (pour les deux types)
+                    if (item['observations'] != null && item['observations'].toString().isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      const Text(
+                        "Observations :",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[100],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey[300]!),
+                        ),
+                        child: Text(
+                          item['observations'],
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: couleur,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: const Text(
+                          "Fermer",
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
                     ),
                   ],
                 ),
               ),
-
-              _buildDetailRow("Date", item['date'], Icons.calendar_today),
-              _buildDetailRow("Animal", item['animal_nom'], Icons.pets),
-              _buildDetailRow("Vétérinaire", item['veterinaire'], Icons.person),
-              
-              if (item['diagnostic'] != null) ...[
-                const SizedBox(height: 12),
-                const Text(
-                  "Diagnostic :",
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
-                Text(item['diagnostic']),
-              ],
-              
-              if (item['traitement'] != null) ...[
-                const SizedBox(height: 12),
-                const Text(
-                  "Traitement :",
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
-                Text(item['traitement']),
-              ],
-              
-              const SizedBox(height: 12),
-              const Text(
-                "Description :",
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              Text(item['description']),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Fermer"),
-          ),
-        ],
       ),
     );
   }
 
   Widget _buildDetailRow(String label, String value, IconData icon) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icon, size: 20, color: Colors.green[700]),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -467,458 +784,9 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
                 Text(
                   value,
                   style: const TextStyle(
-                    fontSize: 16,
+                    fontSize: 15,
                     fontWeight: FontWeight.w600,
                   ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ============================================================
-// 2. RAPPELS DE VACCINATION - VERSION ÉLEVEUR (LECTURE SEULE)
-// ============================================================
-class RappelsVaccinationEleveur extends StatefulWidget {
-  const RappelsVaccinationEleveur({super.key});
-
-  @override
-  State<RappelsVaccinationEleveur> createState() => _RappelsVaccinationEleveurState();
-}
-
-class _RappelsVaccinationEleveurState extends State<RappelsVaccinationEleveur> with SingleTickerProviderStateMixin {
-  final supabase = Supabase.instance.client;
-  late TabController _tabController;
-  
-  List<Map<String, dynamic>> _vaccinationsRecentes = [];
-  List<Map<String, dynamic>> _rappelsEnCours = [];
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _chargerVaccinations();
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _chargerVaccinations() async {
-    if (!mounted) return;
-
-    setState(() => _isLoading = true);
-
-    try {
-      final userId = supabase.auth.currentUser?.id;
-      if (userId == null) throw Exception("Non connecté");
-
-      // TODO: Charger vaccinations de MES animaux uniquement
-      // final vaccinations = await supabase
-      //     .from('vaccinations')
-      //     .select('''
-      //       *,
-      //       nouveaux_nee!inner(nom, race, user_id),
-      //       animal_acheter!inner(nom, race, user_id)
-      //     ''')
-      //     .or('nouveaux_nee.user_id.eq.$userId,animal_acheter.user_id.eq.$userId')
-      //     .order('date_vaccination', ascending: false);
-
-      // Données fictives
-      _vaccinationsRecentes = [
-        {
-          'animal_nom': 'Bella',
-          'animal_race': 'Ladoum',
-          'nom_vaccin': 'Antirabique',
-          'date_vaccination': '2024-12-10',
-          'date_rappel': '2025-12-10',
-          'veterinaire': 'Dr. Diop',
-          'lot': 'LOT-2024-001',
-        },
-        {
-          'animal_nom': 'Max',
-          'animal_race': 'Peulh Peulh',
-          'nom_vaccin': 'Entérotoxémie',
-          'date_vaccination': '2024-11-15',
-          'date_rappel': '2025-05-15',
-          'veterinaire': 'Dr. Diop',
-          'lot': 'LOT-2024-002',
-        },
-      ];
-
-      _rappelsEnCours = [
-        {
-          'animal_nom': 'Luna',
-          'animal_race': 'Touabire',
-          'nom_vaccin': 'Antirabique',
-          'date_rappel': '2024-12-20',
-          'jours_restants': 2,
-          'statut': 'urgent',
-        },
-        {
-          'animal_nom': 'Rocky',
-          'animal_race': 'Ladoum',
-          'nom_vaccin': 'Peste des petits ruminants',
-          'date_rappel': '2024-12-25',
-          'jours_restants': 7,
-          'statut': 'proche',
-        },
-        {
-          'animal_nom': 'Bella',
-          'animal_race': 'Ladoum',
-          'nom_vaccin': 'Entérotoxémie',
-          'date_rappel': '2025-01-07',
-          'jours_restants': 20,
-          'statut': 'normal',
-        },
-      ];
-
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    } catch (e) {
-      debugPrint("Erreur chargement vaccinations: $e");
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Vaccinations"),
-        backgroundColor: Colors.green[700],
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          tabs: const [
-            Tab(text: "Récentes", icon: Icon(Icons.history)),
-            Tab(text: "Rappels", icon: Icon(Icons.notifications_active)),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _chargerVaccinations,
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Bannière info lecture seule
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            color: Colors.blue[50],
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    "👁️ Mode consultation : Suivez les vaccinations de vos animaux",
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.blue[900],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _buildVaccinationsRecentes(),
-                      _buildRappels(),
-                    ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildVaccinationsRecentes() {
-    if (_vaccinationsRecentes.isEmpty) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.vaccines, size: 80, color: Colors.grey),
-            SizedBox(height: 16),
-            Text("Aucune vaccination enregistrée", style: TextStyle(fontSize: 16)),
-          ],
-        ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _chargerVaccinations,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _vaccinationsRecentes.length,
-        itemBuilder: (context, index) {
-          final vaccination = _vaccinationsRecentes[index];
-          return _buildVaccinationCard(vaccination);
-        },
-      ),
-    );
-  }
-
-  Widget _buildRappels() {
-    if (_rappelsEnCours.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.check_circle, size: 80, color: Colors.green[400]),
-            const SizedBox(height: 16),
-            const Text("Aucun rappel en attente", style: TextStyle(fontSize: 16)),
-            const SizedBox(height: 8),
-            Text(
-              "Tous les vaccins sont à jour !",
-              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _chargerVaccinations,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _rappelsEnCours.length,
-        itemBuilder: (context, index) {
-          final rappel = _rappelsEnCours[index];
-          return _buildRappelCard(rappel);
-        },
-      ),
-    );
-  }
-
-  Widget _buildVaccinationCard(Map<String, dynamic> vaccination) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.green[50],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(Icons.vaccines, color: Colors.green[700], size: 32),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        vaccination['nom_vaccin'],
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        "🐑 ${vaccination['animal_nom']} (${vaccination['animal_race']})",
-                        style: TextStyle(fontSize: 14, color: Colors.grey[700]),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const Divider(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildInfoItem(
-                    Icons.calendar_today,
-                    "Date",
-                    vaccination['date_vaccination'],
-                  ),
-                ),
-                Expanded(
-                  child: _buildInfoItem(
-                    Icons.event_repeat,
-                    "Rappel",
-                    vaccination['date_rappel'],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            _buildInfoItem(Icons.person, "Vétérinaire", vaccination['veterinaire']),
-            if (vaccination['lot'] != null) ...[
-              const SizedBox(height: 8),
-              _buildInfoItem(Icons.qr_code, "Lot", vaccination['lot']),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRappelCard(Map<String, dynamic> rappel) {
-    Color couleur;
-    String message;
-    IconData iconeStatut;
-    
-    if (rappel['jours_restants'] <= 7) {
-      couleur = Colors.red;
-      message = "⚠️ URGENT";
-      iconeStatut = Icons.error;
-    } else if (rappel['jours_restants'] <= 14) {
-      couleur = Colors.orange;
-      message = "⚡ Bientôt";
-      iconeStatut = Icons.warning;
-    } else {
-      couleur = Colors.blue;
-      message = "📅 À venir";
-      iconeStatut = Icons.info;
-    }
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border(left: BorderSide(color: couleur, width: 4)),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          rappel['nom_vaccin'],
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          "🐑 ${rappel['animal_nom']} (${rappel['animal_race']})",
-                          style: TextStyle(fontSize: 14, color: Colors.grey[700]),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: couleur.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: couleur, width: 2),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(iconeStatut, size: 16, color: couleur),
-                        const SizedBox(width: 4),
-                        Text(
-                          message,
-                          style: TextStyle(
-                            color: couleur,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Icon(Icons.access_time, size: 20, color: couleur),
-                  const SizedBox(width: 8),
-                  Text(
-                    "Dans ${rappel['jours_restants']} jours",
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: couleur,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                "Date du rappel : ${rappel['date_rappel']}",
-                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[200]!, width: 1),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        "Contactez votre vétérinaire pour prendre rendez-vous",
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.blue[900],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInfoItem(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: Colors.grey[600]),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                Text(
-                  value,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
                 ),
               ],
             ),

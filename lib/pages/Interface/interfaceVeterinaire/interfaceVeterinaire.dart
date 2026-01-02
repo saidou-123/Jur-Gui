@@ -4,7 +4,7 @@ import 'package:depart/widgets/OptionCercle.dart';
 import 'package:depart/widgets/optioncard.dart';
 import 'package:depart/Veterinaires/FichesSante.dart';
 import 'package:depart/Veterinaires/HistoriqueMedical.dart';
-import 'package:depart/Veterinaires/ScanRFIDVeterinaire.dart';
+import 'package:depart/Veterinaires/Scanveterinaire/ScanRFIDVeterinaire.dart';
 import 'package:depart/Veterinaires/Vaccinations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -347,7 +347,7 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire> {
           padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: [
+            children: [ 
               ListTile(
                 leading: const Icon(Icons.person),
                 title: const Text("Mon Profil"),

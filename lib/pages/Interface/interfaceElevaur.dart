@@ -2,6 +2,8 @@ import 'package:depart/Eleveures/Accouplemaent/Accouplement.dart';
 import 'package:depart/Eleveures/Ajouter%20Animal/AjouterAnimal.dart';
 import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDPage.dart';
 import 'package:depart/Eleveures/Chaleur/Chaleur.dart';
+import 'package:depart/Eleveures/Mon%20Troupeau/HistoriqueMedicalEleveur.dart';
+import 'package:depart/Eleveures/Mon%20Troupeau/SupprimerAnimal/RappelsVaccinationEleveur.dart';
 import 'package:depart/widgets/OptionCercle.dart';
 import 'package:depart/widgets/optioncard.dart';
 import 'package:flutter/material.dart';
@@ -174,13 +176,20 @@ class interfaceElevaur extends StatelessWidget {
               OptionCard(
                 image: 'assets/image/img5.png',
                 label: "Transport",
-                route:  const Chaleur(),
+                route:  const  HistoriqueMedicalEleveur(),
               ),
               OptionCard(
                 image: 'assets/image/img14.png',
                 label: 'Scan ',
                 route: const AnimalInfoRFIDPage(),
               ),
+
+// Puis utilisez-le dans vos options
+OptionCard(
+  image: 'assets/image/img5.png',
+  label: "Vaccinations",
+  route: const RappelsVaccinationEleveur(),
+),
             ],
           ),
         ],

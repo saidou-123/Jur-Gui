@@ -1,9 +1,9 @@
+import 'package:depart/Veterinaires/Scanveterinaire/FicheSanteDetailAnimal.dart';
+import 'package:depart/Veterinaires/Scanveterinaire/NouvelleConsultationPage.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// ============================================================
-// SCAN RFID VÉTÉRINAIRE - Accès à tous les animaux
-// ============================================================
+
 class ScanRFIDVeterinaire extends StatefulWidget {
   const ScanRFIDVeterinaire({super.key});
 
@@ -48,10 +48,20 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
             schema: 'public',
             table: 'rfid_scans',
             callback: (payload) {
-              if (payload.newRecord.isEmpty || !payload.newRecord.containsKey('uid')) return;
+              debugPrint("🔔 REALTIME EVENT RECEIVED: ${payload.toString()}");
               
-              final uid = payload.newRecord['uid']?.toString();
-              if (uid == null || uid.isEmpty) return;
+              if (payload.newRecord.isEmpty) {
+                debugPrint("⚠️ Payload vide reçu");
+                return;
+              }
+
+              final uid = payload.newRecord['uid']?.toString().trim();
+              debugPrint("📡 UID extrait: '$uid'");
+              
+              if (uid == null || uid.isEmpty) {
+                debugPrint("⚠️ UID null ou vide");
+                return;
+              }
 
               if (mounted) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -61,6 +71,11 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
             },
           )
           .subscribe((status, [error]) {
+            debugPrint("📡 Statut Realtime: $status");
+            if (error != null) {
+              debugPrint("❌ Erreur Realtime: $error");
+            }
+
             if (!mounted) return;
 
             setState(() {
@@ -68,10 +83,13 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
             });
 
             if (status == RealtimeSubscribeStatus.subscribed) {
-              _showSnackBar("Système RFID connecté", Colors.green);
+              _showSnackBar("✅ Système RFID connecté", Colors.green);
+            } else if (status == RealtimeSubscribeStatus.channelError) {
+              _showSnackBar("❌ Erreur de connexion RFID", Colors.red);
             }
           });
     } catch (e) {
+      debugPrint("❌ Erreur initialisation Realtime: $e");
       if (mounted) {
         _showSnackBar("Erreur Realtime: ${e.toString()}", Colors.red);
       }
@@ -88,9 +106,20 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
       debugPrint("Erreur désabonnement : $e");
     }
   }
-
+  
   Future<void> _onTagDetected(String uid) async {
     if (!mounted) return;
+
+    // 🆕 LOGS DE DEBUG POUR L'UTILISATEUR CONNECTÉ
+    debugPrint("═══════════════════════════════════════");
+    final currentUser = Supabase.instance.client.auth.currentUser;
+    debugPrint("👤 USER CONNECTÉ:");
+    debugPrint("   - ID: ${currentUser?.id}");
+    debugPrint("   - Email: ${currentUser?.email}");
+    debugPrint("   - Metadata: ${currentUser?.userMetadata}");
+    debugPrint("═══════════════════════════════════════");
+
+    debugPrint("🔍 RECHERCHE ANIMAL AVEC TAG: '$uid'");
 
     setState(() {
       _isSearching = true;
@@ -102,43 +131,64 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
     _showSnackBar("🔍 Recherche en cours...", Colors.blue);
 
     try {
-      // Rechercher dans nouveaux_nee
+      // ÉTAPE 1: Nettoyer le UID
+      final cleanUid = uid.trim().toUpperCase();
+      debugPrint("🧹 UID nettoyé: '$cleanUid'");
+
+      // ÉTAPE 2: Rechercher dans nouveaux_nee
+      debugPrint("🔎 Recherche dans nouveaux_nee...");
       var result = await Supabase.instance.client
           .from('nouveaux_nee')
           .select('*')
-          .eq('tag_rfid', uid)
+          .ilike('tag_rfid', cleanUid)
           .maybeSingle();
 
+      debugPrint("📊 Résultat nouveaux_nee: ${result?.toString() ?? 'null'}");
+
       if (result != null) {
+        debugPrint("✅ Animal trouvé dans nouveaux_nee!");
         if (mounted) {
           setState(() {
             _animalInfo = result;
-            _sourceTable = 'nouveaux_nee';
+            _sourceTable = 'nee'; // ✅ CORRIGÉ : 'nee' au lieu de 'nouveaux_nee'
             _isSearching = false;
           });
-          _showSnackBar("✅ Animal trouvé !", Colors.green);
+          _showSnackBar("✅ Animal trouvé dans nouveaux-nés!", Colors.green);
         }
         return;
       }
 
-      // Rechercher dans animal_acheter
+      // ÉTAPE 3: Rechercher dans animal_acheter
+      debugPrint("🔎 Recherche dans animal_acheter...");
       result = await Supabase.instance.client
           .from('animal_acheter')
           .select('*')
-          .eq('tag_rfid', uid)
+          .ilike('tag_rfid', cleanUid)
           .maybeSingle();
 
+      debugPrint("📊 Résultat animal_acheter: ${result?.toString() ?? 'null'}");
+
       if (result != null) {
+        debugPrint("✅ Animal trouvé dans animal_acheter!");
         if (mounted) {
           setState(() {
             _animalInfo = result;
-            _sourceTable = 'animal_acheter';
+            _sourceTable = 'achete'; // ✅ CORRIGÉ : 'achete' au lieu de 'animal_acheter'
             _isSearching = false;
           });
-          _showSnackBar("✅ Animal trouvé !", Colors.green);
+          _showSnackBar("✅ Animal trouvé dans animaux achetés!", Colors.green);
         }
         return;
       }
+
+      // ÉTAPE 4: Aucun résultat
+      debugPrint("❌ AUCUN ANIMAL TROUVÉ avec le tag: '$cleanUid'");
+      
+      // Vérifier tous les tags existants pour debug
+      final allTags = await Supabase.instance.client
+          .from('nouveaux_nee')
+          .select('tag_rfid');
+      debugPrint("🏷️ Tous les tags dans nouveaux_nee: $allTags");
 
       if (mounted) {
         setState(() {
@@ -146,9 +196,12 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
           _animalInfo = null;
           _sourceTable = null;
         });
-        _showSnackBar("❌ Aucun animal trouvé avec ce tag", Colors.red);
+        _showSnackBar("❌ Aucun animal avec ce tag RFID", Colors.red);
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint("❌ ERREUR lors de la recherche: $e");
+      debugPrint("Stack trace: $stackTrace");
+      
       if (mounted) {
         setState(() => _isSearching = false);
         _showSnackBar("Erreur: ${e.toString()}", Colors.red);
@@ -159,7 +212,7 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
   Future<void> _reconnectRealtime() async {
     if (!mounted) return;
 
-    _showSnackBar("Reconnexion en cours...", Colors.orange);
+    _showSnackBar("🔄 Reconnexion en cours...", Colors.orange);
     setState(() => _isSearching = true);
     
     _unsubscribeRealtime();
@@ -169,6 +222,40 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
     if (mounted) {
       setState(() => _isSearching = false);
     }
+  }
+
+  Future<void> _testManuelRecherche() async {
+    final controller = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Test Manuel"),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: "Entrez un tag RFID",
+            hintText: "Ex: D3F1CD2C",
+          ),
+          textCapitalization: TextCapitalization.characters,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Annuler"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              if (controller.text.isNotEmpty) {
+                _onTagDetected(controller.text);
+              }
+            },
+            child: const Text("Rechercher"),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showSnackBar(String message, Color color) {
@@ -196,6 +283,12 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
               color: _realtimeConnected ? Colors.white : Colors.orange,
             ),
             onPressed: _reconnectRealtime,
+            tooltip: _realtimeConnected ? "Connecté" : "Reconnexion",
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: _testManuelRecherche,
+            tooltip: "Test manuel",
           ),
         ],
       ),
@@ -266,6 +359,15 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
             ),
             textAlign: TextAlign.center,
           ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _testManuelRecherche,
+            icon: const Icon(Icons.edit, color: Colors.white),
+            label: const Text("Test manuel", style: TextStyle(color: Colors.white)),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.white, width: 2),
+            ),
+          ),
         ],
       ),
     );
@@ -323,7 +425,7 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
           ),
           const SizedBox(height: 8),
           Text(
-            "Scannez un tag RFID pour accéder au dossier médical",
+            "Scannez un tag RFID ou utilisez le test manuel",
             style: TextStyle(fontSize: 14, color: Colors.grey[600]),
             textAlign: TextAlign.center,
           ),
@@ -375,6 +477,15 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
               ],
             ),
           ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: _testManuelRecherche,
+            icon: const Icon(Icons.search),
+            label: const Text("Réessayer manuellement"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+            ),
+          ),
         ],
       ),
     );
@@ -388,16 +499,17 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Column(
         children: [
-          // En-tête
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.blue[700],
+              color: Colors.green[700],
               borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
             ),
             child: Column(
               children: [
+                const Icon(Icons.check_circle, color: Colors.white, size: 50),
+                const SizedBox(height: 8),
                 Text(
                   _animalInfo!['nom'] ?? 'Sans nom',
                   style: const TextStyle(
@@ -407,14 +519,13 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
                   ),
                 ),
                 Text(
-                  _sourceTable == 'nouveaux_nee' ? 'Nouveau-né' : 'Animal acheté',
+                  _sourceTable == 'nee' ? '🐑 Nouveau-né' : '🛒 Animal acheté', // ✅ CORRIGÉ
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
               ],
             ),
           ),
 
-          // Image
           if (_animalInfo!['image_url'] != null)
             Image.network(
               _animalInfo!['image_url'],
@@ -423,7 +534,6 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
               fit: BoxFit.cover,
             ),
 
-          // Informations
           Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
@@ -447,7 +557,6 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
             ),
           ),
 
-          // Boutons d'action vétérinaire
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -456,11 +565,13 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     onPressed: () {
-                      // Ouvrir fiche de santé
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => FicheSanteDetail(animal: _animalInfo!),
+                          builder: (context) => FicheSanteDetailAnimal(
+                            animal: _animalInfo!,
+                            source: _sourceTable!,
+                          ),
                         ),
                       );
                     },
@@ -478,7 +589,15 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
                   width: double.infinity,
                   child: OutlinedButton.icon(
                     onPressed: () {
-                      // Ajouter consultation
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => NouvelleConsultationPage(
+                            animal: _animalInfo!,
+                            source: _sourceTable!,
+                          ),
+                        ),
+                      );
                     },
                     icon: const Icon(Icons.add),
                     label: const Text("Nouvelle Consultation"),
@@ -503,10 +622,10 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.blue[50],
+            color: Colors.green[50],
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(icon, size: 24, color: Colors.blue[700]),
+          child: Icon(icon, size: 24, color: Colors.green[700]),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -533,26 +652,6 @@ class _ScanRFIDVeterinaireState extends State<ScanRFIDVeterinaire> {
           ),
         ),
       ],
-    );
-  }
-}
-
-// Page temporaire pour FicheSanteDetail
-class FicheSanteDetail extends StatelessWidget {
-  final Map<String, dynamic> animal;
-
-  const FicheSanteDetail({super.key, required this.animal});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text("Fiche Santé - ${animal['nom']}"),
-        backgroundColor: Colors.green[700],
-      ),
-      body: const Center(
-        child: Text("Fiche de santé détaillée à implémenter"),
-      ),
     );
   }
 }
