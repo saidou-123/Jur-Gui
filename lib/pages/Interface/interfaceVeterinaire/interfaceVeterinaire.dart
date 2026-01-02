@@ -78,23 +78,14 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire> {
               padding: const EdgeInsets.all(16),
               children: [
                 // Barre de recherche
-                _buildSearchBar(),
-                const SizedBox(height: 20),
+              
 
                 // Statistiques
                 _buildStatistiques(),
                 const SizedBox(height: 24),
 
                 // Section Options Cercles
-                const Text(
-                  'Accès rapide:',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _buildOptionsCircles(),
+                
 
                 const SizedBox(height: 24),
 
@@ -129,20 +120,7 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire> {
     );
   }
 
-  Widget _buildSearchBar() {
-    return TextField(
-      decoration: InputDecoration(
-        hintText: "Rechercher un animal ou dossier...",
-        isDense: true,
-        contentPadding: const EdgeInsets.all(12),
-        border: OutlineInputBorder(
-          borderSide: BorderSide(color: Colors.blue[200]!),
-          borderRadius: const BorderRadius.all(Radius.circular(99)),
-        ),
-        prefixIcon: Icon(Icons.search, color: Colors.blue[700]),
-      ),
-    );
-  }
+
 
   Widget _buildStatistiques() {
     return Row(
@@ -311,11 +289,13 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire> {
               image: 'assets/image/img10.png',
               label: "Fiches de Santé",
               route: const FichesSante(),
+              backgroundColor: Color(0xFFE8F5E9), // Vert très clair
             ),
             OptionCard(
               image: 'assets/image/img6.png',
               label: 'Historique Médical',
               route: const HistoriqueMedical(),
+              backgroundColor: Color(0xFFFFF3E0), // Orange très clair
             ),
           ],
         ),
@@ -327,11 +307,13 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire> {
               image: 'assets/image/img5.png',
               label: "Vaccinations",
               route: const Vaccinations(),
+              backgroundColor: Color(0xFFFCE4EC), // Rose très clair
             ),
             OptionCard(
               image: 'assets/image/img14.png',
               label: 'Scan RFID',
               route: const ScanRFIDVeterinaire(),
+              backgroundColor: Color(0xFFFFF9C4), // Jaune très clair
             ),
           ],
         ),

@@ -5,12 +5,16 @@ class OptionCard extends StatelessWidget {
   final String image;
   final String label;
   final Widget route;
+  final Color backgroundColor; // Nouvelle propriété pour la couleur de fond
+  final Color? iconColor; // Couleur optionnelle pour l'icône
 
   const OptionCard({
     super.key,
     required this.image,
     required this.label,
     required this.route,
+    required this.backgroundColor, // Obligatoire maintenant
+    this.iconColor,
   });
 
   @override
@@ -23,17 +27,20 @@ class OptionCard extends StatelessWidget {
         height: 135,
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: Couleur.QuatriemeColor,
+          color: backgroundColor, // Utilise la couleur passée en paramètre
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            // Ajout de la bordure
-            color: Couleur.PremierColor, // Couleur de la bordure
-            width: 2.0, // Épaisseur de la bordure
+            color: Couleur.PremierColor,
+            width: 2.0,
           ),
         ),
         child: Column(
           children: [
-            Image.asset(image, height: 80),
+            Image.asset(
+              image, 
+              height: 80,
+              color: iconColor, // Applique la couleur à l'icône si fournie
+            ),
             const SizedBox(height: 10),
             Text(
               label,

@@ -38,8 +38,8 @@ class AjouterAnimal extends StatelessWidget {
                   child: OptionCard(
                     image: 'assets/image/img6.png',
                     label: "Nouveau-né",
-
                     route: const  NouveauNeePage(),
+                    backgroundColor: Color(0xFFE8F5E9), // Vert très clair
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -47,8 +47,8 @@ class AjouterAnimal extends StatelessWidget {
                   child: OptionCard(
                     image: 'assets/image/img10.png',
                     label: 'Animal acheté',
-
                     route: const AnimalAchate(),
+                    backgroundColor: Color(0xFFFFF3E0), // Orange très clair
                   ),
                 ),
               ],
