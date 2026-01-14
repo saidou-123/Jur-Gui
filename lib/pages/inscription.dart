@@ -145,7 +145,7 @@ class _InscriptionState extends State<Inscription> {
                               role: 'eleveur',
                               titre: '🐑 Éleveur',
                               description: 'Gérer mon troupeau',
-                              icone: Icons.agriculture,
+                              icone: Icons.person,
                               couleur: Colors.green,
                             ),
                           ),

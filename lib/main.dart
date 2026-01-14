@@ -9,14 +9,14 @@ void main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatelessWidget { 
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       color: Colors.white,
-      title: "USSEINPAY ",
+      title: "Jur-Gui ",
       home: Acceuil (),
       debugShowCheckedModeBanner: false,
     );

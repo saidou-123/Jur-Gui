@@ -1,7 +1,10 @@
 import 'package:depart/Eleveures/Ajouter%20Animal/AnimalAchate.dart';
 import 'package:depart/Eleveures/Ajouter%20Animal/NouveauNee.dart';
+import 'package:depart/widgets/couleur.dart';
+import 'package:depart/widgets/optioncardEleveur.dart';
 import 'package:flutter/material.dart';
-import 'package:depart/widgets/optioncard.dart';
+
+
 
 class AjouterAnimal extends StatelessWidget {
   const AjouterAnimal({super.key});
@@ -35,7 +38,7 @@ class AjouterAnimal extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 Expanded(
-                  child: OptionCard(
+                  child: optioncardEleveur(
                     image: 'assets/image/img6.png',
                     label: "Nouveau-né",
                     route: const  NouveauNeePage(),
@@ -44,7 +47,7 @@ class AjouterAnimal extends StatelessWidget {
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: OptionCard(
+                  child: optioncardEleveur(
                     image: 'assets/image/img10.png',
                     label: 'Animal acheté',
                     route: const AnimalAchate(),
@@ -59,3 +62,4 @@ class AjouterAnimal extends StatelessWidget {
     );
   }
 }
+

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:async';
 
 class AnimalInfoRFIDPage extends StatefulWidget {
   const AnimalInfoRFIDPage({super.key});
@@ -12,9 +13,13 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
   RealtimeChannel? _rfidChannel;
   bool _realtimeConnected = false;
   bool _isSearching = false;
+  bool _scanAuthorized = false;
   String? _lastScannedUID;
   Map<String, dynamic>? _animalInfo;
   String? _sourceTable;
+  Timer? _reconnectTimer;
+  int _reconnectAttempts = 0;
+  bool _isReconnecting = false;
 
   @override
   void initState() {
@@ -26,24 +31,34 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
 
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
     _unsubscribeRealtime();
     super.dispose();
   }
 
   // ----------------------------------------------------------
-  // 🟢 REALTIME SUPABASE
+  // 🟢 REALTIME SUPABASE - VERSION ROBUSTE
   // ----------------------------------------------------------
   Future<void> _initializeRealtime() async {
     if (!mounted) return;
 
     try {
-      debugPrint("🔌 Initialisation du canal Realtime...");
+      debugPrint("🔌 Initialisation du canal Realtime (tentative ${_reconnectAttempts + 1})...");
 
+      // Nettoyer l'ancien canal si existant
+      await _unsubscribeRealtime();
+      
       await Future.delayed(const Duration(milliseconds: 500));
 
+      // Créer un nouveau canal avec un nom unique
       final channelName = 'rfid_info_${DateTime.now().millisecondsSinceEpoch}';
       
-      _rfidChannel = Supabase.instance.client.channel(channelName);
+      _rfidChannel = Supabase.instance.client.channel(
+        channelName,
+        opts: const RealtimeChannelConfig(
+          ack: true, // Activer les accusés de réception
+        ),
+      );
 
       _rfidChannel!
           .onPostgresChanges(
@@ -52,6 +67,17 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
             table: 'rfid_scans',
             callback: (payload) {
               debugPrint("⚡ PAYLOAD REÇU = $payload");
+              debugPrint("🔑 État scan autorisé: $_scanAuthorized");
+
+              // Vérifier si le scan est autorisé
+              if (!_scanAuthorized) {
+                debugPrint("🚫 Scan non autorisé - ignoré");
+                debugPrint("❗ ACTION REQUISE: L'utilisateur doit appuyer sur 'AUTORISER LE SCAN'");
+                if (mounted) {
+                  _showSnackBar("⚠️ Veuillez d'abord autoriser le scan", Colors.orange);
+                }
+                return;
+              }
 
               if (payload.newRecord.isEmpty) {
                 debugPrint("⚠️ Payload vide, ignoré");
@@ -71,6 +97,7 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
               }
 
               debugPrint("🟢 UID SCANNÉ = $uid");
+              debugPrint("🔍 Lancement de la recherche pour UID: $uid");
 
               if (mounted) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -84,38 +111,138 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
 
             if (!mounted) return;
 
-            setState(() {
-              _realtimeConnected = (status == RealtimeSubscribeStatus.subscribed);
-            });
+            // Gérer les différents statuts
+            switch (status) {
+              case RealtimeSubscribeStatus.subscribed:
+                debugPrint("✅ Canal Realtime connecté avec succès");
+                setState(() {
+                  _realtimeConnected = true;
+                  _isReconnecting = false;
+                  _reconnectAttempts = 0;
+                });
+                _reconnectTimer?.cancel();
+                _showSnackBar("✅ Système RFID connecté", Colors.green);
+                break;
 
-            if (status == RealtimeSubscribeStatus.subscribed) {
-              debugPrint("✅ Canal Realtime connecté");
-              _showSnackBar("Système RFID connecté", Colors.green);
-            } else if (status == RealtimeSubscribeStatus.closed) {
-              debugPrint("🔴 Canal Realtime fermé");
-              _showSnackBar("Connexion RFID perdue", Colors.orange);
-            } else if (error != null) {
+              case RealtimeSubscribeStatus.closed:
+                debugPrint("🔴 Canal Realtime fermé");
+                setState(() {
+                  _realtimeConnected = false;
+                });
+                _showSnackBar("⚠️ Connexion RFID perdue", Colors.orange);
+                
+                // Tenter une reconnexion automatique
+                _scheduleReconnect();
+                break;
+
+              case RealtimeSubscribeStatus.channelError:
+                debugPrint("❌ Erreur du canal Realtime");
+                setState(() {
+                  _realtimeConnected = false;
+                });
+                _showSnackBar("❌ Erreur de connexion RFID", Colors.red);
+                _scheduleReconnect();
+                break;
+
+              case RealtimeSubscribeStatus.timedOut:
+                debugPrint("⏱️ Timeout de connexion Realtime");
+                setState(() {
+                  _realtimeConnected = false;
+                });
+                _showSnackBar("⏱️ Timeout de connexion", Colors.orange);
+                _scheduleReconnect();
+                break;
+
+              default:
+                debugPrint("⚠️ Statut inconnu: $status");
+            }
+
+            if (error != null) {
               debugPrint("❌ Erreur Realtime : $error");
             }
           });
-    } catch (e) {
+
+      _reconnectAttempts++;
+    } catch (e, stackTrace) {
       debugPrint("❌ ERREUR Realtime : $e");
+      debugPrint("Stack trace: $stackTrace");
+      
       if (mounted) {
-        _showSnackBar("Erreur Realtime: ${e.toString()}", Colors.red);
+        setState(() {
+          _realtimeConnected = false;
+        });
+        _showSnackBar("❌ Erreur: ${e.toString()}", Colors.red);
+        _scheduleReconnect();
       }
     }
   }
 
-  void _unsubscribeRealtime() {
+  // Planifier une reconnexion automatique
+  void _scheduleReconnect() {
+    if (_isReconnecting || _reconnectAttempts >= 5) {
+      if (_reconnectAttempts >= 5) {
+        debugPrint("❌ Nombre maximum de tentatives de reconnexion atteint");
+        _showSnackBar("❌ Reconnexion échouée. Utilisez le bouton WiFi.", Colors.red);
+      }
+      return;
+    }
+
+    _isReconnecting = true;
+    _reconnectTimer?.cancel();
+
+    // Délai progressif: 2s, 4s, 6s, 8s, 10s
+    final delay = Duration(seconds: 2 + (_reconnectAttempts * 2));
+    
+    debugPrint("🔄 Reconnexion planifiée dans ${delay.inSeconds}s...");
+    
+    _reconnectTimer = Timer(delay, () {
+      if (mounted && !_realtimeConnected) {
+        debugPrint("🔄 Tentative de reconnexion automatique...");
+        _initializeRealtime();
+      }
+    });
+  }
+
+  Future<void> _unsubscribeRealtime() async {
     try {
       if (_rfidChannel != null) {
-        Supabase.instance.client.removeChannel(_rfidChannel!);
+        await Supabase.instance.client.removeChannel(_rfidChannel!);
         _rfidChannel = null;
         debugPrint("🔴 Canal Realtime désabonné");
       }
     } catch (e) {
       debugPrint("⚠️ Erreur désabonnement : $e");
     }
+  }
+
+  // ----------------------------------------------------------
+  // 🔑 GESTION DE L'AUTORISATION DE SCAN
+  // ----------------------------------------------------------
+  void _toggleScanAuthorization() {
+    if (!_realtimeConnected) {
+      _showSnackBar("⚠️ Connexion RFID non disponible", Colors.orange);
+      return;
+    }
+
+    setState(() {
+      _scanAuthorized = !_scanAuthorized;
+      
+      // Réinitialiser les résultats quand on désactive
+      if (!_scanAuthorized) {
+        _animalInfo = null;
+        _lastScannedUID = null;
+        _sourceTable = null;
+      }
+    });
+
+    _showSnackBar(
+      _scanAuthorized 
+          ? "✅ Scan autorisé - Approchez un tag RFID" 
+          : "🔒 Scan désactivé",
+      _scanAuthorized ? Colors.green : Colors.grey,
+    );
+
+    debugPrint("🔑 Scan autorisé: $_scanAuthorized");
   }
 
   // ----------------------------------------------------------
@@ -126,6 +253,7 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
 
     debugPrint("════════════════════════════════════");
     debugPrint("🏷️  TAG DÉTECTÉ : $uid");
+    debugPrint("🔍 Début de la recherche...");
     debugPrint("════════════════════════════════════");
 
     setState(() {
@@ -139,63 +267,94 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
 
     try {
       // 🔍 Rechercher dans la table nouveaux_nee
-      debugPrint("🔍 Recherche dans nouveaux_nee...");
-      var result = await Supabase.instance.client
+      debugPrint("🔍 Recherche dans nouveaux_nee avec UID: $uid");
+      
+      final nouveauxNeeQuery = Supabase.instance.client
           .from('nouveaux_nee')
           .select('*')
-          .eq('tag_rfid', uid)
-          .maybeSingle();
+          .eq('tag_rfid', uid);
+      
+      debugPrint("📝 Requête nouveaux_nee construite");
+      
+      var result = await nouveauxNeeQuery.maybeSingle();
+      
+      debugPrint("📊 Résultat nouveaux_nee: ${result != null ? 'TROUVÉ' : 'NON TROUVÉ'}");
+      if (result != null) {
+        debugPrint("✅ Données trouvées: $result");
+      }
 
       if (result != null) {
-        debugPrint("✅ Animal trouvé dans nouveaux_nee");
+        debugPrint("✅ Animal trouvé dans nouveaux_nee - Mise à jour UI");
         if (mounted) {
           setState(() {
             _animalInfo = result;
             _sourceTable = 'nouveaux_nee';
             _isSearching = false;
+            _scanAuthorized = false;
           });
-          _showSnackBar("✅ Animal trouvé !", Colors.green);
+          debugPrint("✅ État mis à jour - Animal: ${result['nom']}");
+          _showSnackBar("✅ Animal trouvé : ${result['nom']}", Colors.green);
         }
         return;
       }
 
       // 🔍 Rechercher dans la table animal_acheter
-      debugPrint("🔍 Recherche dans animal_acheter...");
-      result = await Supabase.instance.client
+      debugPrint("🔍 Recherche dans animal_acheter avec UID: $uid");
+      
+      final animalAcheterQuery = Supabase.instance.client
           .from('animal_acheter')
           .select('*')
-          .eq('tag_rfid', uid)
-          .maybeSingle();
+          .eq('tag_rfid', uid);
+      
+      debugPrint("📝 Requête animal_acheter construite");
+      
+      result = await animalAcheterQuery.maybeSingle();
+      
+      debugPrint("📊 Résultat animal_acheter: ${result != null ? 'TROUVÉ' : 'NON TROUVÉ'}");
+      if (result != null) {
+        debugPrint("✅ Données trouvées: $result");
+      }
 
       if (result != null) {
-        debugPrint("✅ Animal trouvé dans animal_acheter");
+        debugPrint("✅ Animal trouvé dans animal_acheter - Mise à jour UI");
         if (mounted) {
           setState(() {
             _animalInfo = result;
             _sourceTable = 'animal_acheter';
             _isSearching = false;
+            _scanAuthorized = false;
           });
-          _showSnackBar("✅ Animal trouvé !", Colors.green);
+          debugPrint("✅ État mis à jour - Animal: ${result['nom']}");
+          _showSnackBar("✅ Animal trouvé : ${result['nom']}", Colors.green);
         }
         return;
       }
 
-      // ❌ Animal non trouvé
-      debugPrint("❌ Aucun animal trouvé avec ce tag RFID");
+      // ❌ Animal non trouvé dans aucune table
+      debugPrint("❌❌❌ AUCUN ANIMAL TROUVÉ AVEC UID: $uid ❌❌❌");
+      debugPrint("💡 Vérifiez que le tag_rfid dans la base correspond exactement");
+      debugPrint("💡 Format du UID reçu: '$uid' (longueur: ${uid.length})");
+      
       if (mounted) {
         setState(() {
           _isSearching = false;
           _animalInfo = null;
           _sourceTable = null;
+          _scanAuthorized = false;
         });
-        _showSnackBar("❌ Aucun animal trouvé avec ce tag RFID", Colors.red);
+        _showSnackBar("❌ Aucun animal avec ce tag: $uid", Colors.red);
       }
     } catch (e, stackTrace) {
-      debugPrint("❌ Erreur lors de la recherche: $e");
+      debugPrint("❌❌❌ ERREUR LORS DE LA RECHERCHE ❌❌❌");
+      debugPrint("Erreur: $e");
       debugPrint("Stack trace: $stackTrace");
+      
       if (mounted) {
-        setState(() => _isSearching = false);
-        _showSnackBar("Erreur: ${e.toString()}", Colors.red);
+        setState(() {
+          _isSearching = false;
+          _scanAuthorized = false;
+        });
+        _showSnackBar("❌ Erreur: ${e.toString()}", Colors.red);
       }
     }
   }
@@ -206,11 +365,15 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
   Future<void> _reconnectRealtime() async {
     if (!mounted) return;
 
-    _showSnackBar("Reconnexion en cours...", Colors.orange);
+    _showSnackBar("🔄 Reconnexion en cours...", Colors.orange);
     
-    setState(() => _isSearching = true);
+    setState(() {
+      _isSearching = true;
+      _reconnectAttempts = 0; // Réinitialiser le compteur
+    });
     
-    _unsubscribeRealtime();
+    _reconnectTimer?.cancel();
+    await _unsubscribeRealtime();
     await Future.delayed(const Duration(milliseconds: 500));
     await _initializeRealtime();
 
@@ -241,6 +404,19 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
         title: const Text("Info Animal - Scan RFID"),
         backgroundColor: Colors.blue[700],
         actions: [
+          // Indicateur de reconnexion
+          if (_isReconnecting)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+            ),
           IconButton(
             icon: Icon(
               _realtimeConnected ? Icons.wifi : Icons.wifi_off,
@@ -249,7 +425,7 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
             tooltip: _realtimeConnected 
                 ? "RFID connecté" 
                 : "RFID déconnecté - Appuyez pour reconnecter",
-            onPressed: _reconnectRealtime,
+            onPressed: _isReconnecting ? null : _reconnectRealtime,
           ),
         ],
       ),
@@ -259,6 +435,10 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
           children: [
             // Section de scan
             _buildScanSection(),
+            const SizedBox(height: 16),
+
+            // Bouton d'autorisation de scan
+            _buildScanButton(),
             const SizedBox(height: 24),
 
             // Affichage des résultats
@@ -282,14 +462,19 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [Colors.blue[700]!, Colors.blue[500]!],
+          colors: _scanAuthorized 
+              ? [Colors.green[700]!, Colors.green[500]!]
+              : (_realtimeConnected 
+                  ? [Colors.blue[700]!, Colors.blue[500]!]
+                  : [Colors.grey[700]!, Colors.grey[500]!]),
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.blue.withOpacity(0.3),
+            color: (_scanAuthorized ? Colors.green : (_realtimeConnected ? Colors.blue : Colors.grey))
+                .withOpacity(0.3),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -297,16 +482,34 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
       ),
       child: Column(
         children: [
-          Icon(
-            _realtimeConnected ? Icons.nfc : Icons.nfc_outlined,
-            size: 80,
-            color: Colors.white,
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              Icon(
+                _scanAuthorized 
+                    ? Icons.nfc 
+                    : (_realtimeConnected ? Icons.nfc_outlined : Icons.nfc_outlined),
+                size: 80,
+                color: Colors.white,
+              ),
+              if (_isReconnecting)
+                const SizedBox(
+                  width: 100,
+                  height: 100,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 16),
           Text(
-            _realtimeConnected 
-                ? "Prêt à scanner" 
-                : "Connexion en cours...",
+            _scanAuthorized 
+                ? "SCAN AUTORISÉ" 
+                : (_realtimeConnected 
+                    ? "Scan désactivé" 
+                    : (_isReconnecting ? "Reconnexion..." : "Déconnecté")),
             style: const TextStyle(
               color: Colors.white,
               fontSize: 22,
@@ -315,9 +518,13 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            _realtimeConnected
+            _scanAuthorized
                 ? "Approchez un tag RFID du lecteur"
-                : "Veuillez patienter",
+                : (_realtimeConnected 
+                    ? "Appuyez sur le bouton ci-dessous pour autoriser"
+                    : (_isReconnecting 
+                        ? "Tentative de reconnexion (${_reconnectAttempts}/5)..."
+                        : "Appuyez sur l'icône WiFi pour reconnecter")),
             style: const TextStyle(
               color: Colors.white70,
               fontSize: 14,
@@ -325,6 +532,38 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
             textAlign: TextAlign.center,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildScanButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 60,
+      child: ElevatedButton.icon(
+        onPressed: _realtimeConnected && !_isReconnecting 
+            ? _toggleScanAuthorization 
+            : null,
+        icon: Icon(
+          _scanAuthorized ? Icons.stop : Icons.play_arrow,
+          size: 28,
+        ),
+        label: Text(
+          _scanAuthorized ? "ARRÊTER LE SCAN" : "AUTORISER LE SCAN",
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _scanAuthorized ? Colors.red[600] : Colors.green[600],
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: Colors.grey[400],
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          elevation: 4,
+        ),
       ),
     );
   }
@@ -384,7 +623,7 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            "Scannez un tag RFID pour afficher les informations de l'animal",
+            "Autorisez le scan puis approchez un tag RFID pour afficher les informations de l'animal",
             style: TextStyle(
               fontSize: 14,
               color: Colors.grey[600],

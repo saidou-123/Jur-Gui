@@ -11,7 +11,7 @@ class AnimalDeletePage extends StatefulWidget {
 class _AnimalDeletePageState extends State<AnimalDeletePage> {
   List<Map<String, dynamic>> _animals = [];
   bool _isLoading = true;
-  String _selectedTable = 'nouveaux_nee'; // Table par défaut
+  String _filtre = 'Tout';
 
   @override
   void initState() {
@@ -35,19 +35,68 @@ class _AnimalDeletePageState extends State<AnimalDeletePage> {
         return;
       }
 
-      debugPrint("📥 Chargement des animaux depuis: $_selectedTable");
+      List<Map<String, dynamic>> allAnimals = [];
 
-      final response = await Supabase.instance.client
-          .from(_selectedTable)
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', ascending: false);
+      if (_filtre == 'Tout') {
+        // Charger depuis les deux tables
+        debugPrint("📥 Chargement de tous les animaux");
+        
+        final nouveauxNee = await Supabase.instance.client
+            .from('nouveaux_nee')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', ascending: false);
+        
+        final animauxAchetes = await Supabase.instance.client
+            .from('animal_acheter')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', ascending: false);
 
-      debugPrint("✅ ${response.length} animaux chargés");
+        // Ajouter un champ pour identifier la source
+        for (var animal in nouveauxNee) {
+          animal['_table_source'] = 'nouveaux_nee';
+        }
+        for (var animal in animauxAchetes) {
+          animal['_table_source'] = 'animal_acheter';
+        }
+
+        allAnimals = [...nouveauxNee, ...animauxAchetes];
+        
+      } else if (_filtre == 'Nouveau_nee') {
+        debugPrint("📥 Chargement des nouveaux-nés");
+        
+        final response = await Supabase.instance.client
+            .from('nouveaux_nee')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', ascending: false);
+        
+        for (var animal in response) {
+          animal['_table_source'] = 'nouveaux_nee';
+        }
+        allAnimals = List<Map<String, dynamic>>.from(response);
+        
+      } else if (_filtre == 'Animal_acheter') {
+        debugPrint("📥 Chargement des animaux achetés");
+        
+        final response = await Supabase.instance.client
+            .from('animal_acheter')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', ascending: false);
+        
+        for (var animal in response) {
+          animal['_table_source'] = 'animal_acheter';
+        }
+        allAnimals = List<Map<String, dynamic>>.from(response);
+      }
+
+      debugPrint("✅ ${allAnimals.length} animaux chargés");
 
       if (mounted) {
         setState(() {
-          _animals = List<Map<String, dynamic>>.from(response);
+          _animals = allAnimals;
           _isLoading = false;
         });
       }
@@ -64,6 +113,8 @@ class _AnimalDeletePageState extends State<AnimalDeletePage> {
   // 🗑️ SUPPRIMER UN ANIMAL
   // ----------------------------------------------------------
   Future<void> _deleteAnimal(Map<String, dynamic> animal) async {
+    final tableName = animal['_table_source'] ?? 'nouveaux_nee';
+    
     final confirm = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -231,7 +282,7 @@ class _AnimalDeletePageState extends State<AnimalDeletePage> {
 
       // Supprimer l'enregistrement de la base de données
       await Supabase.instance.client
-          .from(_selectedTable)
+          .from(tableName)
           .delete()
           .eq('id', animal['id']);
 
@@ -275,82 +326,62 @@ class _AnimalDeletePageState extends State<AnimalDeletePage> {
         title: const Text("Supprimer des Animaux"),
         backgroundColor: Colors.red[700],
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedTable == 'nouveaux_nee' ? 0 : 1,
-        onTap: (index) {
-          final newTable = index == 0 ? 'nouveaux_nee' : 'animal_acheter';
-          if (newTable != _selectedTable) {
-            setState(() => _selectedTable = newTable);
-            _loadAnimals();
-          }
-        },
-        selectedItemColor: Colors.red[700],
-        unselectedItemColor: Colors.grey,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.child_care),
-            label: 'Nouveaux-nés',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.shopping_cart),
-            label: 'Animaux achetés',
-          ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _animals.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.pets, size: 80, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      Text(
-                        "Aucun animal enregistré",
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        "Cette catégorie est vide",
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[500],
-                        ),
-                      ),
-                    ],
+      body: Column(
+        children: [
+          // Bannière d'avertissement
+          Container(
+            width: double.infinity,
+            color: Colors.red.shade50,
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber, color: Colors.red[700]),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    "Mode suppression : cliquez sur la corbeille pour supprimer un animal",
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.red[700],
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
-                )
-              : Column(
-                  children: [
-                    // Bannière d'avertissement
-                    Container(
-                      width: double.infinity,
-                      color: Colors.red.shade50,
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          Icon(Icons.warning_amber, color: Colors.red[700]),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              "Mode suppression : cliquez sur la corbeille pour supprimer un animal",
+                ),
+              ],
+            ),
+          ),
+          // Filtres
+          _buildFilterChips(),
+          // Liste des animaux
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _animals.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.pets, size: 80, color: Colors.grey[400]),
+                            const SizedBox(height: 16),
+                            Text(
+                              "Aucun animal enregistré",
                               style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.red[700],
-                                fontWeight: FontWeight.w500,
+                                fontSize: 18,
+                                color: Colors.grey[600],
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Liste des animaux
-                    Expanded(
-                      child: RefreshIndicator(
+                            const SizedBox(height: 8),
+                            Text(
+                              "Cette catégorie est vide",
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : RefreshIndicator(
                         onRefresh: _loadAnimals,
                         child: ListView.builder(
                           padding: const EdgeInsets.all(8),
@@ -361,13 +392,54 @@ class _AnimalDeletePageState extends State<AnimalDeletePage> {
                           },
                         ),
                       ),
-                    ),
-                  ],
-                ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChips() {
+    final filtres = ['Tout', 'Nouveau_nee', 'Animal_acheter'];
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: filtres.map((filtre) {
+            final isSelected = _filtre == filtre;
+            String displayLabel = filtre;
+            
+            // Personnaliser l'affichage des labels
+            if (filtre == 'Nouveau_nee') {
+              displayLabel = 'Nouveaux-nés';
+            } else if (filtre == 'Animal_acheter') {
+              displayLabel = 'Animaux achetés';
+            }
+            
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: FilterChip(
+                label: Text(displayLabel),
+                selected: isSelected,
+                onSelected: (selected) {
+                  setState(() => _filtre = filtre);
+                  _loadAnimals();
+                },
+                selectedColor: Colors.red[200],
+                checkmarkColor: Colors.red[900],
+              ),
+            );
+          }).toList(),
+        ),
+      ),
     );
   }
 
   Widget _buildAnimalCard(Map<String, dynamic> animal) {
+    
+   
+    
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
       elevation: 3,
@@ -411,12 +483,20 @@ class _AnimalDeletePageState extends State<AnimalDeletePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      animal['nom'] ?? 'Sans nom',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            animal['nom'] ?? 'Sans nom',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        // Badge pour identifier la source
+                       
+                      ],
                     ),
                     const SizedBox(height: 4),
                     _buildInfoChip(Icons.agriculture, animal['race'] ?? 'N/A'),
