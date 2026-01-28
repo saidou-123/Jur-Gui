@@ -51,7 +51,7 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
       await Future.delayed(const Duration(milliseconds: 500));
 
       // Créer un nouveau canal avec un nom unique
-      final channelName = 'rfid_info_${DateTime.now().millisecondsSinceEpoch}';
+      final channelName = 'rfid_info_ animal';
       
       _rfidChannel = Supabase.instance.client.channel(
         channelName,
@@ -857,3 +857,4 @@ class _AnimalInfoRFIDPageState extends State<AnimalInfoRFIDPage> {
     }
   }
 }
+

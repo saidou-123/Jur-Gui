@@ -1,9 +1,13 @@
+// ============================================================
+// ENREGISTRER ACCOUPLEMENT - VERSION OPTIMISÉE
+// Fichier: lib/Eleveures/Accouplemaent/EnregistrerAccouplement.dart
+// ============================================================
+
+import 'package:depart/securite/ErrorHandler.dart';
+import 'package:depart/securite/Validators.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// ============================================================
-// FORMULAIRE D'ENREGISTREMENT D'ACCOUPLEMENT (VERSION AVEC "AUTRE")
-// ============================================================
 
 class EnregistrerAccouplementPage extends StatefulWidget {
   const EnregistrerAccouplementPage({super.key});
@@ -22,7 +26,7 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
   Map<String, dynamic>? _brebisSelectionnee;
   Map<String, dynamic>? _belierSelectionne;
   
-  // Pour l'option "Autre"
+  // Option "Autre"
   bool _autreBrebis = false;
   bool _autreBelier = false;
   final _nomAutreBrebisController = TextEditingController();
@@ -55,6 +59,7 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
     super.dispose();
   }
 
+  // ===== CHARGER ANIMAUX =====
   Future<void> _chargerAnimaux() async {
     if (!mounted) return;
     
@@ -62,143 +67,183 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
 
     try {
       final userId = supabase.auth.currentUser?.id;
-      if (userId == null) throw Exception("Utilisateur non connecté");
+      if (userId == null) throw Exception("Non connecté");
 
-      // Charger les brebis disponibles (non gestantes)
-      List<Map<String, dynamic>> toutesLesBrebis = [];
-
-      // Brebis achetées
-      try {
-        final brebisAchetees = await supabase
-            .from('animal_acheter')
-            .select('id, nom, race, image_url, tag_rfid')
-            .eq('sexe', 'Femelle')
-            .eq('user_id', userId)
-            .order('nom');
-
-        for (var b in brebisAchetees) {
-          b['source'] = 'achete';
-          toutesLesBrebis.add(b);
-        }
-      } catch (e) {
-        debugPrint("⚠️ Erreur chargement brebis achetées: $e");
-      }
-
-      // Brebis nées
-      try {
-        final brebisNees = await supabase
-            .from('nouveaux_nee')
-            .select('id, nom, race, image_url, tag_rfid')
-            .eq('sexe', 'Femelle')
-            .eq('user_id', userId)
-            .order('nom');
-
-        for (var b in brebisNees) {
-          b['source'] = 'nee';
-          toutesLesBrebis.add(b);
-        }
-      } catch (e) {
-        debugPrint("⚠️ Erreur chargement brebis nées: $e");
-      }
-
-      // Filtrer les brebis gestantes
-      List<Map<String, dynamic>> brebisDisponibles = [];
-      for (var brebis in toutesLesBrebis) {
-        try {
-          final accouplement = await supabase
-              .from('accouplements')
-              .select('id, date_mise_bas')
-              .eq('brebis_id', brebis['id'])
-              .eq('source_brebis', brebis['source'])
-              .order('date_accouplement', ascending: false)
-              .limit(1)
-              .maybeSingle();
-
-          // Disponible si pas d'accouplement ou si mise bas effectuée
-          if (accouplement == null || accouplement['date_mise_bas'] != null) {
-            brebisDisponibles.add(brebis);
-          }
-        } catch (e) {
-          debugPrint("⚠️ Erreur vérification gestation pour ${brebis['nom']}: $e");
-          brebisDisponibles.add(brebis);
-        }
-      }
-
-      // Charger les béliers
-      List<Map<String, dynamic>> tousLesBeliers = [];
-
-      // Béliers achetés
-      try {
-        final beliersAchetes = await supabase
-            .from('animal_acheter')
-            .select('id, nom, race, tag_rfid, image_url')
-            .eq('sexe', 'Mâle')
-            .eq('user_id', userId)
-            .order('nom');
-
-        for (var b in beliersAchetes) {
-          b['source'] = 'achete';
-          tousLesBeliers.add(b);
-        }
-      } catch (e) {
-        debugPrint("⚠️ Erreur chargement béliers achetés: $e");
-      }
-
-      // Béliers nés
-      try {
-        final beliersNes = await supabase
-            .from('nouveaux_nee')
-            .select('id, nom, race, tag_rfid, image_url')
-            .eq('sexe', 'Mâle')
-            .eq('user_id', userId)
-            .order('nom');
-
-        for (var b in beliersNes) {
-          b['source'] = 'nee';
-          tousLesBeliers.add(b);
-        }
-      } catch (e) {
-        debugPrint("⚠️ Erreur chargement béliers nés: $e");
-      }
+      // ✅ Charger en parallèle
+      final results = await Future.wait([
+        _chargerBrebis(userId),
+        _chargerBeliers(userId),
+      ]);
 
       if (mounted) {
         setState(() {
-          _brebisDisponibles = brebisDisponibles;
-          _beliersDisponibles = tousLesBeliers;
+          _brebisDisponibles = results[0];
+          _beliersDisponibles = results[1];
           _isLoadingAnimaux = false;
         });
+        
+        debugPrint("✅ ${_brebisDisponibles.length} brebis, ${_beliersDisponibles.length} béliers");
       }
-    } catch (e) {
-      debugPrint("❌ Erreur chargement animaux: $e");
+    } catch (error, stackTrace) {
+      ErrorHandler.log(error, stackTrace, context: 'Chargement animaux accouplement');
       if (mounted) {
-        _showSnackBar("Erreur de chargement", Colors.red);
+        ErrorHandler.show(context, error);
         setState(() => _isLoadingAnimaux = false);
       }
     }
   }
 
+  // ===== CHARGER BREBIS DISPONIBLES =====
+  Future<List<Map<String, dynamic>>> _chargerBrebis(String userId) async {
+    List<Map<String, dynamic>> toutesLesBrebis = [];
+
+    // Brebis achetées
+    try {
+      final achetes = await supabase
+          .from('animal_acheter')
+          .select('id, nom, race, image_url, tag_rfid')
+          .eq('sexe', 'Femelle')
+          .eq('user_id', userId)
+          .order('nom');
+
+      for (var b in achetes) {
+        b['source'] = 'achete';
+        toutesLesBrebis.add(b);
+      }
+    } catch (e) {
+      debugPrint("⚠️ Erreur brebis achetées: $e");
+    }
+
+    // Brebis nées
+    try {
+      final nees = await supabase
+          .from('nouveaux_nee')
+          .select('id, nom, race, image_url, tag_rfid')
+          .eq('sexe', 'Femelle')
+          .eq('user_id', userId)
+          .order('nom');
+
+      for (var b in nees) {
+        b['source'] = 'nee';
+        toutesLesBrebis.add(b);
+      }
+    } catch (e) {
+      debugPrint("⚠️ Erreur brebis nées: $e");
+    }
+
+    // ✅ Filtrer les brebis gestantes
+    List<Map<String, dynamic>> disponibles = [];
+    for (var brebis in toutesLesBrebis) {
+      try {
+        final accouplement = await supabase
+            .from('accouplements')
+            .select('id, date_mise_bas')
+            .eq('brebis_id', brebis['id'])
+            .eq('source_brebis', brebis['source'])
+            .order('date_accouplement', ascending: false)
+            .limit(1)
+            .maybeSingle();
+
+        // Disponible si pas d'accouplement ou mise bas effectuée
+        if (accouplement == null || accouplement['date_mise_bas'] != null) {
+          disponibles.add(brebis);
+        }
+      } catch (e) {
+        debugPrint("⚠️ Erreur vérification gestation: $e");
+        disponibles.add(brebis); // En cas d'erreur, inclure
+      }
+    }
+
+    return disponibles;
+  }
+
+  // ===== CHARGER BÉLIERS =====
+  Future<List<Map<String, dynamic>>> _chargerBeliers(String userId) async {
+    List<Map<String, dynamic>> tousLesBeliers = [];
+
+    // Béliers achetés
+    try {
+      final achetes = await supabase
+          .from('animal_acheter')
+          .select('id, nom, race, tag_rfid, image_url')
+          .eq('sexe', 'Mâle')
+          .eq('user_id', userId)
+          .order('nom');
+
+      for (var b in achetes) {
+        b['source'] = 'achete';
+        tousLesBeliers.add(b);
+      }
+    } catch (e) {
+      debugPrint("⚠️ Erreur béliers achetés: $e");
+    }
+
+    // Béliers nés
+    try {
+      final nes = await supabase
+          .from('nouveaux_nee')
+          .select('id, nom, race, tag_rfid, image_url')
+          .eq('sexe', 'Mâle')
+          .eq('user_id', userId)
+          .order('nom');
+
+      for (var b in nes) {
+        b['source'] = 'nee';
+        tousLesBeliers.add(b);
+      }
+    } catch (e) {
+      debugPrint("⚠️ Erreur béliers nés: $e");
+    }
+
+    return tousLesBeliers;
+  }
+
+  // ===== ENREGISTRER AVEC VALIDATION =====
   Future<void> _enregistrer() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Validation brebis
+    // ✅ Validation brebis
     if (!_autreBrebis && _brebisSelectionnee == null) {
-      _showSnackBar("Veuillez sélectionner une brebis", Colors.orange);
+      ErrorHandler.show(context, "Veuillez sélectionner une brebis");
       return;
     }
     
-    if (_autreBrebis && _nomAutreBrebisController.text.trim().isEmpty) {
-      _showSnackBar("Veuillez entrer le nom de la brebis", Colors.orange);
-      return;
+    if (_autreBrebis) {
+      final validation = Validators.name(
+        _nomAutreBrebisController.text,
+        fieldName: 'Le nom de la brebis',
+      );
+      if (validation != null) {
+        ErrorHandler.show(context, validation);
+        return;
+      }
     }
 
-    // Validation bélier
+    // ✅ Validation bélier
     if (!_autreBelier && _belierSelectionne == null) {
-      _showSnackBar("Veuillez sélectionner un bélier", Colors.orange);
+      ErrorHandler.show(context, "Veuillez sélectionner un bélier");
       return;
     }
     
-    if (_autreBelier && _nomAutreBelierController.text.trim().isEmpty) {
-      _showSnackBar("Veuillez entrer le nom du bélier", Colors.orange);
+    if (_autreBelier) {
+      final validation = Validators.name(
+        _nomAutreBelierController.text,
+        fieldName: 'Le nom du bélier',
+      );
+      if (validation != null) {
+        ErrorHandler.show(context, validation);
+        return;
+      }
+    }
+
+    // ✅ Validation date
+    final dateValidation = Validators.date(
+      _dateAccouplement,
+      maxDate: DateTime.now(),
+      errorMessage: 'La date ne peut pas être future',
+    );
+    if (dateValidation != null) {
+      ErrorHandler.show(context, dateValidation);
       return;
     }
 
@@ -213,40 +258,40 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
         _heureAccouplement.minute,
       );
 
-      // Calculer la date de mise bas prévue (145-150 jours, moyenne 147)
+      // Date de mise bas prévue (147 jours)
       final dateMiseBasPrevue = dateComplete.add(const Duration(days: 147));
 
-      // Préparer les données d'accouplement
+      // ✅ Préparer données
       final Map<String, dynamic> accouplementData = {
         'date_accouplement': dateComplete.toIso8601String(),
         'methode_accouplement': _methodeAccouplement,
         'date_mise_bas_prevue': dateMiseBasPrevue.toIso8601String(),
-        'notes': _notesController.text.trim(),
+        'notes': Validators.sanitize(_notesController.text),
         'gestation_confirmee': false,
         'user_id': supabase.auth.currentUser!.id,
         'created_at': DateTime.now().toIso8601String(),
       };
 
-      // Gérer la brebis
+      // Gérer brebis
       if (_autreBrebis) {
         accouplementData['brebis_id'] = null;
         accouplementData['source_brebis'] = 'externe';
-        accouplementData['brebis_externe_nom'] = _nomAutreBrebisController.text.trim();
+        accouplementData['brebis_externe_nom'] = Validators.sanitize(_nomAutreBrebisController.text);
         accouplementData['brebis_externe_race'] = _raceAutreBrebisController.text.trim().isNotEmpty 
-            ? _raceAutreBrebisController.text.trim() 
+            ? Validators.sanitize(_raceAutreBrebisController.text) 
             : 'Non spécifiée';
       } else {
         accouplementData['brebis_id'] = _brebisSelectionnee!['id'];
         accouplementData['source_brebis'] = _brebisSelectionnee!['source'];
       }
 
-      // Gérer le bélier
+      // Gérer bélier
       if (_autreBelier) {
         accouplementData['belier_id'] = null;
         accouplementData['source_belier'] = 'externe';
-        accouplementData['belier_externe_nom'] = _nomAutreBelierController.text.trim();
+        accouplementData['belier_externe_nom'] = Validators.sanitize(_nomAutreBelierController.text);
         accouplementData['belier_externe_race'] = _raceAutreBelierController.text.trim().isNotEmpty 
-            ? _raceAutreBelierController.text.trim() 
+            ? Validators.sanitize(_raceAutreBelierController.text) 
             : 'Non spécifiée';
       } else {
         accouplementData['belier_id'] = _belierSelectionne!['id'];
@@ -255,26 +300,26 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
 
       await supabase.from('accouplements').insert(accouplementData);
 
-      debugPrint("✅ Accouplement enregistré avec succès");
+      debugPrint("✅ Accouplement enregistré");
 
       if (mounted) {
         setState(() => _isLoading = false);
         await _showSuccessDialog(dateComplete, dateMiseBasPrevue);
       }
-    } catch (e) {
-      debugPrint("❌ Erreur enregistrement: $e");
+    } catch (error, stackTrace) {
+      ErrorHandler.log(error, stackTrace, context: 'Enregistrement accouplement');
       if (mounted) {
-        _showSnackBar("❌ Erreur: ${e.toString()}", Colors.red);
+        ErrorHandler.show(context, error);
         setState(() => _isLoading = false);
       }
     }
   }
 
+  // ===== DIALOGUE SUCCÈS =====
   Future<void> _showSuccessDialog(
     DateTime dateAccouplement,
     DateTime dateMiseBasPrevue,
   ) async {
-    // Obtenir les noms pour l'affichage
     String nomBrebis = _autreBrebis 
         ? _nomAutreBrebisController.text.trim() 
         : _brebisSelectionnee!['nom'];
@@ -297,47 +342,21 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildInfoBox(
-                "👥 Couple reproducteur",
-                "🐑 $nomBrebis${_autreBrebis ? ' (Externe)' : ''}\n"
-                "💙 $nomBelier${_autreBelier ? ' (Externe)' : ''}",
+                "💥 Couple",
+                "🐑 $nomBrebis${_autreBrebis ? ' (Externe)' : ''}\n💙 $nomBelier${_autreBelier ? ' (Externe)' : ''}",
                 Colors.purple,
               ),
               const SizedBox(height: 12),
               _buildInfoBox(
-                "📅 Date d'accouplement",
+                "📅 Date accouplement",
                 _formatDateTime(dateAccouplement),
                 Colors.blue,
               ),
               const SizedBox(height: 12),
               _buildInfoBox(
                 "🤰 Mise bas prévue",
-                "${_formatDate(dateMiseBasPrevue)}\n(147 jours de gestation)",
+                "${_formatDate(dateMiseBasPrevue)}\n(147 jours)",
                 Colors.green,
-              ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.orange[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange, width: 2),
-                ),
-                child: const Column(
-                  children: [
-                    Text(
-                      "⏰ Prochaines étapes",
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      "• J+17-21 : Surveiller retour chaleur\n"
-                      "• J+30 : Échographie possible\n"
-                      "• J+45 : Confirmation gestation\n"
-                      "• J+147 : Préparation mise bas",
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
               ),
             ],
           ),
@@ -386,18 +405,6 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
     );
   }
 
-  void _showSnackBar(String message, Color color) {
-    if (!mounted) return;
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
   String _formatDate(DateTime date) {
     return "${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}";
   }
@@ -406,6 +413,7 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
     return "${_formatDate(date)} à ${date.hour}h${date.minute.toString().padLeft(2, '0')}";
   }
 
+  // ===== UI =====
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -422,7 +430,7 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
                     children: [
                       CircularProgressIndicator(),
                       SizedBox(height: 16),
-                      Text("Enregistrement en cours..."),
+                      Text("Enregistrement..."),
                     ],
                   ),
                 )
@@ -477,7 +485,6 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
             ),
             const SizedBox(height: 12),
             
-            // Dropdown avec option "Autre"
             DropdownButtonFormField<String>(
               value: _autreBrebis ? 'autre' : (_brebisSelectionnee?['id']?.toString()),
               decoration: const InputDecoration(
@@ -488,32 +495,7 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
                 ..._brebisDisponibles.map((brebis) {
                   return DropdownMenuItem(
                     value: brebis['id'].toString(),
-                    child: Row(
-                      children: [
-                        if (brebis['image_url'] != null)
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: Image.network(
-                              brebis['image_url'],
-                              width: 30,
-                              height: 30,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return const Icon(Icons.pets, size: 30);
-                              },
-                            ),
-                          )
-                        else
-                          const Icon(Icons.pets, size: 30),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            "${brebis['nom']} (${brebis['race']})",
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
+                    child: Text("${brebis['nom']} (${brebis['race']})"),
                   );
                 }),
                 const DropdownMenuItem(
@@ -523,7 +505,7 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
                       Icon(Icons.add_circle_outline, color: Colors.orange),
                       SizedBox(width: 8),
                       Text(
-                        "Autre (animal externe)",
+                        "Autre (externe)",
                         style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
                       ),
                     ],
@@ -543,10 +525,8 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
                   }
                 });
               },
-              validator: (val) => val == null ? 'Sélectionnez une brebis' : null,
             ),
             
-            // Champs pour "Autre brebis"
             if (_autreBrebis) ...[
               const SizedBox(height: 12),
               Container(
@@ -557,22 +537,7 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
                   border: Border.all(color: Colors.orange, width: 2),
                 ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.info_outline, color: Colors.orange, size: 20),
-                        SizedBox(width: 8),
-                        Text(
-                          "Brebis externe",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
                     TextFormField(
                       controller: _nomAutreBrebisController,
                       decoration: const InputDecoration(
@@ -582,17 +547,12 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
                         filled: true,
                         fillColor: Colors.white,
                       ),
-                      validator: (val) => 
-                          _autreBrebis && (val == null || val.trim().isEmpty) 
-                              ? 'Nom requis' 
-                              : null,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _raceAutreBrebisController,
                       decoration: const InputDecoration(
                         labelText: "Race (optionnel)",
-                        hintText: "Ex: Ladoum, Peul...",
                         border: OutlineInputBorder(),
                         filled: true,
                         fillColor: Colors.white,
@@ -627,7 +587,6 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
             ),
             const SizedBox(height: 12),
             
-            // Dropdown avec option "Autre"
             DropdownButtonFormField<String>(
               value: _autreBelier ? 'autre' : (_belierSelectionne?['id']?.toString()),
               decoration: const InputDecoration(
@@ -638,10 +597,7 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
                 ..._beliersDisponibles.map((belier) {
                   return DropdownMenuItem(
                     value: belier['id'].toString(),
-                    child: Text(
-                      "${belier['nom']} (${belier['race']})",
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    child: Text("${belier['nom']} (${belier['race']})"),
                   );
                 }),
                 const DropdownMenuItem(
@@ -651,7 +607,7 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
                       Icon(Icons.add_circle_outline, color: Colors.orange),
                       SizedBox(width: 8),
                       Text(
-                        "Autre (animal externe)",
+                        "Autre (externe)",
                         style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange),
                       ),
                     ],
@@ -671,10 +627,8 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
                   }
                 });
               },
-              validator: (val) => val == null ? 'Sélectionnez un bélier' : null,
             ),
             
-            // Champs pour "Autre bélier"
             if (_autreBelier) ...[
               const SizedBox(height: 12),
               Container(
@@ -685,22 +639,7 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
                   border: Border.all(color: Colors.blue, width: 2),
                 ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.info_outline, color: Colors.blue, size: 20),
-                        SizedBox(width: 8),
-                        Text(
-                          "Bélier externe",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
                     TextFormField(
                       controller: _nomAutreBelierController,
                       decoration: const InputDecoration(
@@ -710,17 +649,12 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
                         filled: true,
                         fillColor: Colors.white,
                       ),
-                      validator: (val) => 
-                          _autreBelier && (val == null || val.trim().isEmpty) 
-                              ? 'Nom requis' 
-                              : null,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _raceAutreBelierController,
                       decoration: const InputDecoration(
                         labelText: "Race (optionnel)",
-                        hintText: "Ex: Ladoum, Peul...",
                         border: OutlineInputBorder(),
                         filled: true,
                         fillColor: Colors.white,
@@ -803,7 +737,7 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
       maxLines: 3,
       decoration: const InputDecoration(
         labelText: "Notes (optionnel)",
-        hintText: "Observations, comportement, conditions...",
+        hintText: "Observations...",
         border: OutlineInputBorder(),
         prefixIcon: Icon(Icons.notes, color: Colors.purple),
       ),
@@ -820,20 +754,16 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
             ? const SizedBox(
                 width: 20,
                 height: 20,
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 2,
-                ),
+                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
               )
             : const Icon(Icons.check_circle),
         label: Text(
-          _isLoading ? "Enregistrement..." : "Enregistrer l'accouplement",
+          _isLoading ? "Enregistrement..." : "Enregistrer",
           style: const TextStyle(fontSize: 16),
         ),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.purple[700],
           foregroundColor: Colors.white,
-          disabledBackgroundColor: Colors.grey,
         ),
       ),
     );

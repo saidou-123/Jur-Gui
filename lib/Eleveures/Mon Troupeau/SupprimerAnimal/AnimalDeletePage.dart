@@ -438,8 +438,6 @@ class _AnimalDeletePageState extends State<AnimalDeletePage> {
 
   Widget _buildAnimalCard(Map<String, dynamic> animal) {
     
-   
-    
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
       elevation: 3,

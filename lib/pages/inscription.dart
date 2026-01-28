@@ -1,11 +1,15 @@
+// ============================================================
+// PAGE D'INSCRIPTION - VERSION OPTIMISÉE
+// Fichier: lib/pages/inscription.dart
+// ============================================================
+
 import 'package:depart/pages/connexion.dart';
+import 'package:depart/securite/ErrorHandler.dart';
+import 'package:depart/securite/Validators.dart';
 import 'package:depart/widgets/couleur.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// ============================================================
-// 1. PAGE D'INSCRIPTION AVEC SÉLECTION DU RÔLE
-// ============================================================
 class Inscription extends StatefulWidget {
   const Inscription({super.key});
 
@@ -14,16 +18,21 @@ class Inscription extends StatefulWidget {
 }
 
 class _InscriptionState extends State<Inscription> {
+  final _formKey = GlobalKey<FormState>();
+  final _supabase = Supabase.instance.client;
+  
+  // Controllers
   final _nomController = TextEditingController();
   final _prenomController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
   
+  // État
   bool _isLoading = false;
-  String? _roleSelectionne; // "eleveur" ou "veterinaire"
-  final supabase = Supabase.instance.client;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+  String? _roleSelectionne;
 
   @override
   void dispose() {
@@ -35,57 +44,55 @@ class _InscriptionState extends State<Inscription> {
     super.dispose();
   }
 
+  // ===== INSCRIPTION =====
   Future<void> _signUp() async {
     if (!_formKey.currentState!.validate()) return;
 
     if (_roleSelectionne == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text("⚠️ Veuillez sélectionner votre rôle (Éleveur ou Vétérinaire)"),
-        backgroundColor: Colors.orange,
-      ));
-      return;
-    }
-
-    if (_passwordController.text != _confirmPasswordController.text) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text("❌ Les mots de passe ne correspondent pas"),
-        backgroundColor: Colors.red,
-      ));
+      ErrorHandler.show(
+        context,
+        'Veuillez sélectionner votre rôle (Éleveur ou Vétérinaire)',
+      );
       return;
     }
 
     setState(() => _isLoading = true);
     
     try {
-      // ✅ CORRECTION: Stocker les données dans user_metadata
-      final response = await supabase.auth.signUp(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+      // ✅ Sanitizer les inputs
+      final nom = Validators.sanitize(_nomController.text);
+      final prenom = Validators.sanitize(_prenomController.text);
+      final email = _emailController.text.trim().toLowerCase();
+      
+      // ✅ Inscription avec metadata
+      final response = await _supabase.auth.signUp(
+        email: email,
+        password: _passwordController.text,
         data: {
-          'nom': _nomController.text.trim(),
-          'prenom': _prenomController.text.trim(),
+          'nom': nom,
+          'prenom': prenom,
           'role': _roleSelectionne,
+          'nom_complet': '$prenom $nom',
         },
       );
 
       if (response.user != null && mounted) {
-        // ✅ Le trigger va automatiquement insérer dans la table users
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("✅ Inscription réussie ! Vérifiez votre email pour confirmer votre compte."),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 10),
-        ));
-        
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const Connexion()),
-        );
+        // ✅ Succès
+        await _showSuccessDialog();
       }
-    } catch (e) {
+    } catch (error, stackTrace) {
+      ErrorHandler.log(
+        error,
+        stackTrace,
+        context: 'Inscription utilisateur',
+        additionalData: {
+          'email': _emailController.text,
+          'role': _roleSelectionne,
+        },
+      );
+      
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text("❌ Erreur : ${e.toString()}"),
-          backgroundColor: Colors.red,
-        ));
+        ErrorHandler.show(context, error);
       }
     } finally {
       if (mounted) {
@@ -94,185 +101,258 @@ class _InscriptionState extends State<Inscription> {
     }
   }
 
+  // ===== DIALOGUE DE SUCCÈS =====
+  Future<void> _showSuccessDialog() async {
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        icon: const Icon(
+          Icons.check_circle,
+          color: Colors.green,
+          size: 64,
+        ),
+        title: const Text(
+          '✅ Inscription réussie !',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Votre compte a été créé avec succès.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue, width: 2),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.email, color: Colors.blue),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Vérifiez votre email pour confirmer votre compte.',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (context) => const Connexion(),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Se connecter'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
-          child: Container(
-            padding: const EdgeInsets.only(top: 10),
-            margin: const EdgeInsets.all(30),
-            child: Column(
-              children: [
-                Image.asset("assets/image/img3.png", width: 200),
-                Text(
-                  "Inscription",
-                  style: TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.bold,
-                    color: Couleur.PremierColor,
-                  ),
-                ),
-                Text(
-                  "Bienvenue sur Jur Gui 4.0",
-                  style: TextStyle(color: Couleur.PremierColor),
-                ),
-                const SizedBox(height: 20),
+      backgroundColor: Colors.white,
+
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Logo
+                  _buildLogo(),
+                  const SizedBox(height: 16),
+                  
+                  // Header
+                  _buildHeader(),
+                  const SizedBox(height: 32),
+                // Sélection du rôle
+                _buildRoleSelection(),
+                const SizedBox(height: 24),
                 
-                // ===== SÉLECTION DU RÔLE =====
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.blue, width: 2),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        "👤 Sélectionnez votre rôle :",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildRoleCard(
-                              role: 'eleveur',
-                              titre: '🐑 Éleveur',
-                              description: 'Gérer mon troupeau',
-                              icone: Icons.person,
-                              couleur: Colors.green,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildRoleCard(
-                              role: 'veterinaire',
-                              titre: '⚕️ Vétérinaire',
-                              description: 'Gérer la santé',
-                              icone: Icons.medical_services,
-                              couleur: Colors.blue,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                // Formulaire
+                _buildTextField(
+                  controller: _nomController,
+                  label: 'Nom',
+                  hint: 'Votre nom de famille',
+                  icon: Icons.person_outline,
+                  validator: (value) => Validators.name(value, fieldName: 'Le nom'),
+                ),
+                const SizedBox(height: 16),
+                
+                _buildTextField(
+                  controller: _prenomController,
+                  label: 'Prénom',
+                  hint: 'Votre prénom',
+                  icon: Icons.person,
+                  validator: (value) => Validators.name(value, fieldName: 'Le prénom'),
+                ),
+                const SizedBox(height: 16),
+                
+                _buildTextField(
+                  controller: _emailController,
+                  label: 'Email',
+                  hint: 'votre.email@example.com',
+                  icon: Icons.email_outlined,
+                  keyboardType: TextInputType.emailAddress,
+                  validator: Validators.email,
+                ),
+                const SizedBox(height: 16),
+                
+                _buildPasswordField(
+                  controller: _passwordController,
+                  label: 'Mot de passe',
+                  hint: 'Minimum 8 caractères',
+                  obscure: _obscurePassword,
+                  onToggle: () => setState(() => _obscurePassword = !_obscurePassword),
+                  validator: Validators.password,
+                ),
+                const SizedBox(height: 16),
+                
+                _buildPasswordField(
+                  controller: _confirmPasswordController,
+                  label: 'Confirmer le mot de passe',
+                  hint: 'Retapez votre mot de passe',
+                  obscure: _obscureConfirmPassword,
+                  onToggle: () => setState(() => 
+                      _obscureConfirmPassword = !_obscureConfirmPassword),
+                  validator: (value) => Validators.confirmPassword(
+                    value,
+                    _passwordController.text,
                   ),
                 ),
+                const SizedBox(height: 32),
                 
-                const SizedBox(height: 20),
+                // Bouton d'inscription
+                _buildSubmitButton(),
+                const SizedBox(height: 16),
                 
-                Form(
-                  key: _formKey,
-                  child: Column(
-                    children: [
-                      TextFormField(
-                        controller: _nomController,
-                        decoration: InputDecoration(
-                          labelText: "Nom",
-                          hintText: "Votre nom",
-                          prefixIcon: Icon(Icons.person, color: Couleur.PremierColor),
-                          border: const OutlineInputBorder(),
-                        ),
-                        validator: (val) => val!.isEmpty ? 'Champ requis' : null,
-                      ),
-                      const SizedBox(height: 15),
-                      TextFormField(
-                        controller: _prenomController,
-                        decoration: InputDecoration(
-                          labelText: "Prénom",
-                          hintText: "Votre prénom",
-                          prefixIcon: Icon(Icons.person, color: Couleur.PremierColor),
-                          border: const OutlineInputBorder(),
-                        ),
-                        validator: (val) => val!.isEmpty ? 'Champ requis' : null,
-                      ),
-                      const SizedBox(height: 15),
-                      TextFormField(
-                        controller: _emailController,
-                        decoration: InputDecoration(
-                          labelText: "Email",
-                          hintText: "votre.email@example.com",
-                          prefixIcon: Icon(Icons.email, color: Couleur.PremierColor),
-                          border: const OutlineInputBorder(),
-                        ),
-                        keyboardType: TextInputType.emailAddress,
-                        validator: (val) => (val == null || !val.contains('@')) ? 'Email invalide' : null,
-                      ),
-                      const SizedBox(height: 15),
-                      TextFormField(
-                        controller: _passwordController,
-                        obscureText: true,
-                        decoration: InputDecoration(
-                          labelText: "Mot de passe",
-                          hintText: "Minimum 6 caractères",
-                          prefixIcon: Icon(Icons.lock, color: Couleur.PremierColor),
-                          border: const OutlineInputBorder(),
-                        ),
-                        validator: (val) => (val == null || val.length < 6) ? 'Minimum 6 caractères' : null,
-                      ),
-                      const SizedBox(height: 15),
-                      TextFormField(
-                        controller: _confirmPasswordController,
-                        obscureText: true,
-                        decoration: InputDecoration(
-                          labelText: "Confirmer le mot de passe",
-                          hintText: "Retapez votre mot de passe",
-                          prefixIcon: Icon(Icons.lock, color: Couleur.PremierColor),
-                          border: const OutlineInputBorder(),
-                        ),
-                        validator: (val) => (val == null || val.isEmpty) ? 'Champ requis' : null,
-                      ),
-                      const SizedBox(height: 20),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 50,
-                        child: ElevatedButton(
-                          onPressed: _isLoading ? null : _signUp,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Couleur.PremierColor,
-                          ),
-                          child: _isLoading
-                              ? const CircularProgressIndicator(color: Colors.white)
-                              : const Text(
-                                  "S'inscrire",
-                                  style: TextStyle(color: Colors.white, fontSize: 16),
-                                ),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Text("Vous avez déjà un compte ?"),
-                          GestureDetector(
-                            onTap: () {
-                              Navigator.of(context).pushReplacement(
-                                MaterialPageRoute(builder: (context) => const Connexion()),
-                              );
-                            },
-                            child: const Text(
-                              " Connectez-vous",
-                              style: TextStyle(
-                                color: Colors.red,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
+                // Lien vers connexion
+                _buildLoginLink(),
               ],
             ),
           ),
         ),
+      ),
+    ),
+    );
+  }
+
+       Widget _buildLogo() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Couleur.PremierColor.withOpacity(0.1),
+        shape: BoxShape.circle,
+      ),
+      child: Image.asset(
+        "assets/image/img3.png",
+        width: 120,
+        height: 120,
+        errorBuilder: (context, error, stackTrace) {
+          return Icon(
+            Icons.pets,
+            size: 80,
+            color: Couleur.PremierColor,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Column(
+      children: [
+        Text(
+          "Inscription",
+          style: TextStyle(
+            fontSize: 32,
+            fontWeight: FontWeight.bold,
+            color: Couleur.PremierColor,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          "Connectez-vous à Jur Gui 4.0",
+          style: TextStyle(
+            fontSize: 16,
+            color: Colors.grey[600],
+          ),
+        ),
+      ],
+    );
+  }
+
+
+  Widget _buildRoleSelection() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.blue[50],
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.blue[200]!, width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '👤 Je suis :',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildRoleCard(
+                  role: 'eleveur',
+                  titre: '🐑 Éleveur',
+                  description: 'Gérer mon troupeau',
+                  icon: Icons.agriculture,
+                  color: Colors.green,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildRoleCard(
+                  role: 'veterinaire',
+                  titre: '⚕️ Vétérinaire',
+                  description: 'Soigner les animaux',
+                  icon: Icons.medical_services,
+                  color: Colors.blue,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -281,48 +361,160 @@ class _InscriptionState extends State<Inscription> {
     required String role,
     required String titre,
     required String description,
-    required IconData icone,
-    required Color couleur,
+    required IconData icon,
+    required Color color,
   }) {
-    final estSelectionne = _roleSelectionne == role;
+    final isSelected = _roleSelectionne == role;
     
     return GestureDetector(
       onTap: () => setState(() => _roleSelectionne = role),
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: estSelectionne ? couleur.withOpacity(0.2) : Colors.white,
-          borderRadius: BorderRadius.circular(8),
+          color: isSelected ? color.withOpacity(0.2) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: estSelectionne ? couleur : Colors.grey.shade300,
-            width: estSelectionne ? 3 : 1,
+            color: isSelected ? color : Colors.grey[300]!,
+            width: isSelected ? 3 : 1,
           ),
         ),
         child: Column(
           children: [
-            Icon(icone, size: 40, color: couleur),
+            Icon(icon, size: 40, color: color),
             const SizedBox(height: 8),
             Text(
               titre,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: couleur,
+                color: color,
+                fontSize: 14,
               ),
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 4),
             Text(
               description,
-              style: const TextStyle(fontSize: 12),
+              style: const TextStyle(fontSize: 11),
               textAlign: TextAlign.center,
             ),
-            if (estSelectionne)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Icon(Icons.check_circle, color: couleur, size: 24),
-              ),
+            if (isSelected) ...[
+              const SizedBox(height: 8),
+              Icon(Icons.check_circle, color: color, size: 24),
+            ],
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    TextInputType? keyboardType,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        prefixIcon: Icon(icon, color: Couleur.PremierColor),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        filled: true,
+        fillColor: Colors.grey[50],
+      ),
+    );
+  }
+
+  Widget _buildPasswordField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required bool obscure,
+    required VoidCallback onToggle,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      obscureText: obscure,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        prefixIcon: Icon(Icons.lock_outline, color: Couleur.PremierColor),
+        suffixIcon: IconButton(
+          icon: Icon(
+            obscure ? Icons.visibility_off : Icons.visibility,
+            color: Colors.grey[600],
+          ),
+          onPressed: onToggle,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        filled: true,
+        fillColor: Colors.grey[50],
+      ),
+    );
+  }
+
+  Widget _buildSubmitButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 56,
+      child: ElevatedButton(
+        onPressed: _isLoading ? null : _signUp,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Couleur.PremierColor,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: Colors.grey[300],
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        child: _isLoading
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
+              )
+            : const Text(
+                'S\'inscrire',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildLoginLink() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text('Vous avez déjà un compte ?'),
+        const SizedBox(width: 4),
+        TextButton(
+          onPressed: () => Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const Connexion()),
+          ),
+          child: const Text(
+            'Se connecter',
+            style: TextStyle(fontWeight: FontWeight.bold,color:Colors.red ),
+          ),
+        ),
+      ],
     );
   }
 }

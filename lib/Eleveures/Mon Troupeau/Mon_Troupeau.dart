@@ -1,9 +1,6 @@
-import 'package:depart/Eleveures/Accouplemaent/EnregistrerAccouplement.dart';
-import 'package:depart/Eleveures/Ajouter%20Animal/AjouterAnimal.dart';
+
 import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDPage.dart';
-import 'package:depart/Eleveures/Chaleur/Chaleur.dart';
 import 'package:depart/Eleveures/Mon%20Troupeau/SupprimerAnimal/AnimalDeletePage.dart';
-import 'package:depart/Eleveures/Mon%20Troupeau/SupprimerAnimal/RappelsVaccinationEleveur.dart';
 import 'package:depart/Eleveures/Mon%20Troupeau/ModfierAnimal/AnimalListPage.dart';
 import 'package:depart/Eleveures/Mon%20Troupeau/HistoriqueMedicalEleveur.dart';
 import 'package:depart/widgets/couleur.dart';

@@ -1,6 +1,5 @@
 import 'package:depart/Eleveures/Ajouter%20Animal/AnimalAchate.dart';
 import 'package:depart/Eleveures/Ajouter%20Animal/NouveauNee.dart';
-import 'package:depart/widgets/couleur.dart';
 import 'package:depart/widgets/optioncardEleveur.dart';
 import 'package:flutter/material.dart';
 
