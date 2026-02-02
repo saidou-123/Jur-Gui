@@ -4,13 +4,13 @@
 // ============================================================
 
 
+import 'package:depart/Eleveures/Accouplemaent/ANI/AnimalAchateBluetooth.dart';
+import 'package:depart/Eleveures/Accouplemaent/ANI/NouveauNeeBluetooth.dart';
+import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDBluetooth.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:depart/Eleveures/Accouplemaent/EnregistrerAccouplement.dart';
-import 'package:depart/Eleveures/Ajouter%20Animal/AjouterAnimal.dart';
-import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDPage.dart';
 import 'package:depart/Eleveures/Chaleur/Chaleur.dart';
-import 'package:depart/Eleveures/Mon%20Troupeau/HistoriqueMedicalEleveur.dart';
 import 'package:depart/Eleveures/Mon%20Troupeau/Mon_Troupeau.dart';
 import 'package:depart/widgets/optioncardEleveur.dart';
 import 'package:depart/securite/ErrorHandler.dart';
@@ -555,7 +555,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => const AnimalInfoRFIDPage(),
+                          builder: (context) => const AnimalInfoBLEPage(),
                         ),
                       );
                     },
@@ -662,7 +662,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               child: optioncardEleveur(
                 image: 'assets/image/img14.png',
                 label: 'Ajouter Animal',
-                route: const AjouterAnimal(),
+                route: const AnimalAchateBluetooth(),
                 backgroundColor: const Color(0xFFFFF9C4),
               ),
             ),
@@ -675,7 +675,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               child: optioncardEleveur(
                 image: 'assets/image/img5.png',
                 label: "Historique Médical",
-                route: const HistoriqueMedicalEleveur(),
+                route: const  NouveauNeeBluetooth (),
                 backgroundColor: const Color(0xFFE3F2FD),
               ),
             ),

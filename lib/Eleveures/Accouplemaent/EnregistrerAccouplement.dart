@@ -725,7 +725,6 @@ class _EnregistrerAccouplementPageState extends State<EnregistrerAccouplementPag
       items: const [
         DropdownMenuItem(value: "Naturel", child: Text("Naturel")),
         DropdownMenuItem(value: "Insémination artificielle", child: Text("Insémination artificielle")),
-        DropdownMenuItem(value: "Lutte en main", child: Text("Lutte en main")),
       ],
       onChanged: (val) => setState(() => _methodeAccouplement = val!),
     );
