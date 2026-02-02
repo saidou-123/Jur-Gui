@@ -5,6 +5,7 @@
 
 import 'package:depart/Eleveures/Accouplemaent/ANI/AnimalAchateBluetooth.dart';
 import 'package:depart/Eleveures/Accouplemaent/ANI/NouveauNeeBluetooth.dart';
+import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDBluetooth.dart';
 import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDPage.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -554,7 +555,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => const AnimalInfoRFIDPage (),
+                          builder: (context) => const AnimalInfoRFIDPageBluetooth (),
                         ),
                       );
                     },
