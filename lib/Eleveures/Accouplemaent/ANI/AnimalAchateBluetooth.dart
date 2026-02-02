@@ -1,5 +1,5 @@
 // ============================================================
-// ANIMAL ACHETÉ - VERSION BLE
+// ANIMAL ACHETÉ - VERSION BLE CORRIGÉE
 // Fichier: lib/Eleveures/Ajouter Animal/AnimalAchateBluetooth.dart
 // Communication Bluetooth BLE avec ESP32 + RFID
 // ============================================================
@@ -40,12 +40,12 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _rfidCharacteristic;
   StreamSubscription? _scanSubscription;
-  StreamSubscription? _deviceStateSubscription;
+  StreamSubscription? _deviceStateSubscription;  
   StreamSubscription? _characteristicSubscription;
   bool _isScanning = false;
   bool _isConnected = false;
   
-  // UUID personnalisés (À ADAPTER selon ton ESP32)
+  // UUID personnalisés (MÊME UUID que NouveauNeeBluetooth)
   static const String SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
   static const String CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
   
@@ -143,10 +143,11 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
             
             debugPrint("📡 Appareil trouvé: $deviceName (${result.device.remoteId})");
             
-            // Chercher notre ESP32 (adapter le nom selon ton code ESP32)
+            // Chercher notre ESP32
             if (deviceName.contains("ESP32") || 
                 deviceName.contains("RFID") ||
-                deviceName.contains("BLE_RFID")) {
+                deviceName.contains("BLE_RFID") ||
+                deviceName.contains("Jur-Gui")) {
               
               debugPrint("✅ ESP32 RFID détecté!");
               _connectToDevice(result.device);
@@ -435,7 +436,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
       _rfidCharacteristic = null;
     });
     
-    // Optionnel: Reconnexion automatique
+    // Reconnexion automatique
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted && !_isConnected) {
         _showSnackBar("🔄 Tentative de reconnexion...", Colors.blue);
@@ -482,6 +483,8 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
                 children: [
                   _buildInfoRow(Icons.pets, "Nom", existing['nom'] ?? 'N/A'),
                   _buildInfoRow(Icons.agriculture, "Race", existing['race'] ?? 'N/A'),
+                  _buildInfoRow(Icons.wc, "Sexe", existing['sexe'] ?? 'N/A'),
+                  _buildInfoRow(Icons.location_on, "Provenance", existing['provenance'] ?? 'N/A'),
                   _buildInfoRow(Icons.nfc, "Tag", existing['tag_rfid'] ?? 'N/A'),
                 ],
               ),
@@ -588,68 +591,97 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
 
   Future<String?> _uploadImage(XFile file) async {
     try {
+      debugPrint("📤 Début upload image...");
+      
       final bytes = await file.readAsBytes();
       final fileExt = file.path.split('.').last;
       final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
-      final filePath = 'animals/$fileName';
+      final filePath = 'animal_acheter/$fileName';
+
+      debugPrint("📁 Chemin: $filePath");
+      debugPrint("📦 Taille: ${bytes.length} bytes");
 
       await Supabase.instance.client.storage
-          .from('images')
+          .from('uploads')
           .uploadBinary(filePath, bytes);
 
       final url = Supabase.instance.client.storage
-          .from('images')
+          .from('uploads')
           .getPublicUrl(filePath);
 
+      debugPrint("✅ Image uploadée: $url");
       return url;
     } catch (e, stackTrace) {
+      debugPrint("❌ Erreur upload: $e");
       ErrorHandler.log(e, stackTrace, context: 'Upload image');
       return null;
     }
   }
 
-  // ===== ENREGISTREMENT =====
+  // ===== ENREGISTREMENT AMÉLIORÉ =====
   Future<void> _enregistrer() async {
-    // Validation des champs
+    debugPrint("═══════════════════════════════════════");
+    debugPrint("🚀 DÉBUT ENREGISTREMENT");
+    debugPrint("═══════════════════════════════════════");
+
+    // ✅ VALIDATION DES CHAMPS AVEC MESSAGES DÉTAILLÉS
+    debugPrint("📋 Validation des champs...");
+    
     if (_nomController.text.trim().isEmpty) {
+      debugPrint("❌ Nom vide");
       ErrorHandler.show(context, "Le nom est requis");
       return;
     }
+    debugPrint("✅ Nom: ${_nomController.text.trim()}");
 
     if (_provenanceController.text.trim().isEmpty) {
+      debugPrint("❌ Provenance vide");
       ErrorHandler.show(context, "La provenance est requise");
       return;
     }
+    debugPrint("✅ Provenance: ${_provenanceController.text.trim()}");
 
-    if (_selectedSexe == null) {
-      ErrorHandler.show(context, "Le sexe est requis");
-      return;
-    }
-
-    if (_selectedRace == null) {
+    if (_selectedRace == null || _selectedRace!.trim().isEmpty) {
+      debugPrint("❌ Race non sélectionnée");
       ErrorHandler.show(context, "La race est requise");
       return;
     }
+    debugPrint("✅ Race: $_selectedRace");
+
+    if (_selectedSexe == null) {
+      debugPrint("❌ Sexe non sélectionné");
+      ErrorHandler.show(context, "Le sexe est requis");
+      return;
+    }
+    debugPrint("✅ Sexe: $_selectedSexe");
 
     if (_pickedFile == null) {
+      debugPrint("❌ Aucune photo");
       ErrorHandler.show(context, "Une photo est requise");
       return;
     }
+    debugPrint("✅ Photo: ${_pickedFile!.path}");
 
     if (_tagRFID == null) {
+      debugPrint("❌ Aucun tag RFID");
       ErrorHandler.show(context, "Scannez un tag RFID");
       return;
     }
+    debugPrint("✅ Tag RFID: $_tagRFID");
 
     final rfidValidation = Validators.rfid(_tagRFID);
     if (rfidValidation != null) {
+      debugPrint("❌ Validation RFID échouée: $rfidValidation");
       ErrorHandler.show(context, rfidValidation);
       return;
     }
+    debugPrint("✅ Tag RFID validé");
 
     setState(() => _isLoading = true);
 
     try {
+      debugPrint("🔍 Vérification doublon...");
+      
       // Vérification finale doublon
       final existing = await Supabase.instance.client
           .from('animal_acheter')
@@ -658,38 +690,66 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
           .maybeSingle();
 
       if (existing != null) {
+        debugPrint("⚠️ Tag déjà utilisé: ${existing['nom']}");
         if (mounted) {
           setState(() => _isLoading = false);
           await _showDuplicateDialog(existing);
         }
         return;
       }
+      debugPrint("✅ Tag disponible");
 
       // Upload image
+      debugPrint("📤 Upload de l'image...");
       final url = await _uploadImage(_pickedFile!);
       if (url == null) {
+        debugPrint("❌ Échec upload image");
         throw Exception("Erreur upload image");
       }
+      debugPrint("✅ Image uploadée: $url");
 
-      // ✅ Sanitizer les données
-      await Supabase.instance.client.from('animal_acheter').insert({
+      // ✅ Préparer les données
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId == null) {
+        debugPrint("❌ Utilisateur non connecté");
+        throw Exception("Utilisateur non connecté");
+      }
+      debugPrint("✅ User ID: $userId");
+
+      final dataToInsert = {
         'nom': Validators.sanitize(_nomController.text),
         'provenance': Validators.sanitize(_provenanceController.text),
-        'race': _selectedRace,
+        'race': Validators.sanitize(_selectedRace!),
         'sexe': _selectedSexe,
         'image_url': url,
         'tag_rfid': _tagRFID,
-        'user_id': Supabase.instance.client.auth.currentUser!.id,
+        'user_id': userId,
         'created_at': DateTime.now().toIso8601String(),
-      });
+      };
 
-      debugPrint("✅ Animal enregistré");
+      debugPrint("📝 Données à insérer:");
+      debugPrint(dataToInsert.toString());
+
+      // Insertion dans Supabase
+      debugPrint("💾 Insertion dans Supabase...");
+      await Supabase.instance.client
+          .from('animal_acheter')
+          .insert(dataToInsert);
+
+      debugPrint("✅✅✅ ENREGISTREMENT RÉUSSI!");
 
       if (mounted) {
-        ErrorHandler.showSuccess(context, "✅ Animal enregistré avec succès!");
+        ErrorHandler.showSuccess(context, "✅ Animal acheté enregistré avec succès!");
         _resetForm();
       }
+      
     } catch (error, stackTrace) {
+      debugPrint("═══════════════════════════════════════");
+      debugPrint("❌ ERREUR LORS DE L'ENREGISTREMENT");
+      debugPrint("Erreur: $error");
+      debugPrint("Stack: $stackTrace");
+      debugPrint("═══════════════════════════════════════");
+      
       ErrorHandler.log(error, stackTrace, context: 'Enregistrement animal acheté');
       if (mounted) {
         ErrorHandler.show(context, error);
@@ -703,11 +763,12 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
 
   void _resetForm() {
     _nomController.clear();
+    _raceController.clear();
     _provenanceController.clear();
     _uidController.clear();
     setState(() {
-      _selectedRace = null;
       _selectedSexe = null;
+      _selectedRace = null;
       _pickedFile = null;
       _tagRFID = null;
     });
@@ -729,7 +790,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Animal Acheté"),
+        title: const Text("Jur Gui 4.0 - Animal Acheté"),
         backgroundColor: Colors.green[700],
         actions: [
           // Icône Bluetooth avec état
@@ -906,15 +967,22 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
         DropdownMenuItem(value: "Peulh Peulh", child: Text("Peulh Peulh")),
         DropdownMenuItem(value: "Touabire", child: Text("Touabire")),
       ],
-      onChanged: (val) => setState(() => _selectedRace = val),
+      onChanged: (val) {
+        setState(() {
+          _selectedRace = val;
+          if (val != null) {
+            _raceController.text = val;
+          }
+        });
+      },
     );
   }
 
   Widget _buildUidField() {
     return TextFormField(
       controller: _uidController,
-      readOnly: true, // ✅ CHAMP EN LECTURE SEULE
-      enabled: false,  // ✅ DÉSACTIVÉ POUR EMPÊCHER TOUTE MODIFICATION
+      readOnly: true,
+      enabled: false,
       decoration: InputDecoration(
         labelText: "UID RFID *",
         border: const OutlineInputBorder(),

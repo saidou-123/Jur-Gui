@@ -1,5 +1,5 @@
 // ============================================================
-// NOUVEAU-NÉ - VERSION BLE
+// NOUVEAU-NÉ - VERSION BLE CORRIGÉE
 // Fichier: lib/Eleveures/Ajouter Animal/NouveauNeeBluetooth.dart
 // Communication NouveauNeeBluetooth BLE avec ESP32 + RFID
 // ============================================================
@@ -589,10 +589,15 @@ class _NouveauNeeBluetoothState extends State<NouveauNeeBluetooth> {
 
   Future<String?> _uploadImage(XFile file) async {
     try {
+      debugPrint("📤 Début upload image...");
+      
       final bytes = await file.readAsBytes();
       final fileExt = file.path.split('.').last;
       final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
       final filePath = 'nouveaux_nee/$fileName';
+
+      debugPrint("📁 Chemin: $filePath");
+      debugPrint("📦 Taille: ${bytes.length} bytes");
 
       await Supabase.instance.client.storage
           .from('uploads')
@@ -602,55 +607,80 @@ class _NouveauNeeBluetoothState extends State<NouveauNeeBluetooth> {
           .from('uploads')
           .getPublicUrl(filePath);
 
+      debugPrint("✅ Image uploadée: $url");
       return url;
     } catch (e, stackTrace) {
+      debugPrint("❌ Erreur upload: $e");
       ErrorHandler.log(e, stackTrace, context: 'Upload image');
       return null;
     }
   }
 
-  // ===== ENREGISTREMENT =====
+  // ===== ENREGISTREMENT AMÉLIORÉ =====
   Future<void> _enregistrer() async {
-    // Validation des champs
+    debugPrint("═══════════════════════════════════════");
+    debugPrint("🚀 DÉBUT ENREGISTREMENT");
+    debugPrint("═══════════════════════════════════════");
+
+    // ✅ VALIDATION DES CHAMPS AVEC MESSAGES DÉTAILLÉS
+    debugPrint("📋 Validation des champs...");
+    
     if (_nomController.text.trim().isEmpty) {
+      debugPrint("❌ Nom vide");
       ErrorHandler.show(context, "Le nom est requis");
       return;
     }
+    debugPrint("✅ Nom: ${_nomController.text.trim()}");
 
-    if (_raceController.text.trim().isEmpty) {
+    // ⚠️ CORRECTION ICI: Vérifier _selectedRace au lieu de _raceController
+    if (_selectedRace == null || _selectedRace!.trim().isEmpty) {
+      debugPrint("❌ Race non sélectionnée");
       ErrorHandler.show(context, "La race est requise");
       return;
     }
+    debugPrint("✅ Race: $_selectedRace");
 
     if (_dateController.text.trim().isEmpty) {
+      debugPrint("❌ Date vide");
       ErrorHandler.show(context, "La date de naissance est requise");
       return;
     }
+    debugPrint("✅ Date: ${_dateController.text.trim()}");
 
     if (_selectedSexe == null) {
+      debugPrint("❌ Sexe non sélectionné");
       ErrorHandler.show(context, "Le sexe est requis");
       return;
     }
+    debugPrint("✅ Sexe: $_selectedSexe");
 
     if (_pickedFile == null) {
+      debugPrint("❌ Aucune photo");
       ErrorHandler.show(context, "Une photo est requise");
       return;
     }
+    debugPrint("✅ Photo: ${_pickedFile!.path}");
 
     if (_tagRFID == null) {
+      debugPrint("❌ Aucun tag RFID");
       ErrorHandler.show(context, "Scannez un tag RFID");
       return;
     }
+    debugPrint("✅ Tag RFID: $_tagRFID");
 
     final rfidValidation = Validators.rfid(_tagRFID);
     if (rfidValidation != null) {
+      debugPrint("❌ Validation RFID échouée: $rfidValidation");
       ErrorHandler.show(context, rfidValidation);
       return;
     }
+    debugPrint("✅ Tag RFID validé");
 
     setState(() => _isLoading = true);
 
     try {
+      debugPrint("🔍 Vérification doublon...");
+      
       // Vérification finale doublon
       final existing = await Supabase.instance.client
           .from('nouveaux_nee')
@@ -659,38 +689,67 @@ class _NouveauNeeBluetoothState extends State<NouveauNeeBluetooth> {
           .maybeSingle();
 
       if (existing != null) {
+        debugPrint("⚠️ Tag déjà utilisé: ${existing['nom']}");
         if (mounted) {
           setState(() => _isLoading = false);
           await _showDuplicateDialog(existing);
         }
         return;
       }
+      debugPrint("✅ Tag disponible");
 
       // Upload image
+      debugPrint("📤 Upload de l'image...");
       final url = await _uploadImage(_pickedFile!);
       if (url == null) {
+        debugPrint("❌ Échec upload image");
         throw Exception("Erreur upload image");
       }
+      debugPrint("✅ Image uploadée: $url");
 
-      // ✅ Sanitizer les données
-      await Supabase.instance.client.from('nouveaux_nee').insert({
+      // ✅ Préparer les données
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId == null) {
+        debugPrint("❌ Utilisateur non connecté");
+        throw Exception("Utilisateur non connecté");
+      }
+      debugPrint("✅ User ID: $userId");
+
+      // ✅ CORRECTION: Utiliser _selectedRace au lieu de _raceController
+      final dataToInsert = {
         'nom': Validators.sanitize(_nomController.text),
-        'race': Validators.sanitize(_raceController.text),
+        'race': Validators.sanitize(_selectedRace!),  // ⚠️ CHANGEMENT ICI
         'date_naissance': _dateController.text.trim(),
         'sexe': _selectedSexe,
         'image_url': url,
         'tag_rfid': _tagRFID,
-        'user_id': Supabase.instance.client.auth.currentUser!.id,
+        'user_id': userId,
         'created_at': DateTime.now().toIso8601String(),
-      });
+      };
 
-      debugPrint("✅ Nouveau-né enregistré");
+      debugPrint("📝 Données à insérer:");
+      debugPrint(dataToInsert.toString());
+
+      // Insertion dans Supabase
+      debugPrint("💾 Insertion dans Supabase...");
+      await Supabase.instance.client
+          .from('nouveaux_nee')
+          .insert(dataToInsert);
+
+      debugPrint("✅✅✅ ENREGISTREMENT RÉUSSI!");
 
       if (mounted) {
         ErrorHandler.showSuccess(context, "✅ Nouveau-né enregistré avec succès!");
         _resetForm();
       }
+      
     } catch (error, stackTrace) {
+      debugPrint("═══════════════════════════════════════");
+      debugPrint("❌ ERREUR LORS DE L'ENREGISTREMENT");
+      debugPrint("Erreur: $error");
+      debugPrint("Stack: $stackTrace");
+      debugPrint("═══════════════════════════════════════");
+      
       ErrorHandler.log(error, stackTrace, context: 'Enregistrement nouveau-né');
       if (mounted) {
         ErrorHandler.show(context, error);
@@ -709,6 +768,7 @@ class _NouveauNeeBluetoothState extends State<NouveauNeeBluetooth> {
     _uidController.clear();
     setState(() {
       _selectedSexe = null;
+      _selectedRace = null;  // ⚠️ Reset aussi selectedRace
       _pickedFile = null;
       _tagRFID = null;
     });
@@ -894,7 +954,7 @@ class _NouveauNeeBluetoothState extends State<NouveauNeeBluetooth> {
     );
   }
 
-    Widget _buildRaceDropdown() {
+  Widget _buildRaceDropdown() {
     return DropdownButtonFormField<String>(
       value: _selectedRace,
       decoration: const InputDecoration(
@@ -907,7 +967,15 @@ class _NouveauNeeBluetoothState extends State<NouveauNeeBluetooth> {
         DropdownMenuItem(value: "Peulh Peulh", child: Text("Peulh Peulh")),
         DropdownMenuItem(value: "Touabire", child: Text("Touabire")),
       ],
-      onChanged: (val) => setState(() => _selectedRace = val),
+      onChanged: (val) {
+        setState(() {
+          _selectedRace = val;
+          // ⚠️ Optionnel: sync avec _raceController si nécessaire
+          if (val != null) {
+            _raceController.text = val;
+          }
+        });
+      },
     );
   }
 

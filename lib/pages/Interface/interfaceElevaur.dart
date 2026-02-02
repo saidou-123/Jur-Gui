@@ -3,10 +3,9 @@
 // Fichier: lib/pages/Interface/interfaceEleveur.dart
 // ============================================================
 
-
 import 'package:depart/Eleveures/Accouplemaent/ANI/AnimalAchateBluetooth.dart';
 import 'package:depart/Eleveures/Accouplemaent/ANI/NouveauNeeBluetooth.dart';
-import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDBluetooth.dart';
+import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDPage.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:depart/Eleveures/Accouplemaent/EnregistrerAccouplement.dart';
@@ -555,7 +554,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => const AnimalInfoBLEPage(),
+                          builder: (context) => const AnimalInfoRFIDPage (),
                         ),
                       );
                     },
@@ -662,7 +661,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               child: optioncardEleveur(
                 image: 'assets/image/img14.png',
                 label: 'Ajouter Animal',
-                route: const AnimalAchateBluetooth(),
+                route: const  NouveauNeeBluetooth (),
                 backgroundColor: const Color(0xFFFFF9C4),
               ),
             ),
@@ -675,7 +674,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               child: optioncardEleveur(
                 image: 'assets/image/img5.png',
                 label: "Historique Médical",
-                route: const  NouveauNeeBluetooth (),
+                route: const AnimalAchateBluetooth (),
                 backgroundColor: const Color(0xFFE3F2FD),
               ),
             ),
