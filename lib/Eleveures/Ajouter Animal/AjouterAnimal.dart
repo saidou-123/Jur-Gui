@@ -1,8 +1,7 @@
-import 'package:depart/Eleveures/Ajouter%20Animal/AnimalAchate.dart';
-import 'package:depart/Eleveures/Ajouter%20Animal/NouveauNee.dart';
+import 'package:depart/Eleveures/Ajouter%20Animal/AnimalAchateBluetooth.dart';
+import 'package:depart/Eleveures/Ajouter%20Animal/NouveauNeeBluetooth.dart';
 import 'package:depart/widgets/optioncardEleveur.dart';
 import 'package:flutter/material.dart';
-
 
 
 class AjouterAnimal extends StatelessWidget {
@@ -40,7 +39,7 @@ class AjouterAnimal extends StatelessWidget {
                   child: optioncardEleveur(
                     image: 'assets/image/img6.png',
                     label: "Nouveau-né",
-                    route: const  NouveauNeePage(),
+                    route: const  NouveauNeeBluetooth(),
                     backgroundColor: Color(0xFFE8F5E9), // Vert très clair
                   ),
                 ),
@@ -49,7 +48,7 @@ class AjouterAnimal extends StatelessWidget {
                   child: optioncardEleveur(
                     image: 'assets/image/img10.png',
                     label: 'Animal acheté',
-                    route: const AnimalAchate(),
+                    route: const AnimalAchateBluetooth(),
                     backgroundColor: Color(0xFFFFF3E0), // Orange très clair
                   ),
                 ),

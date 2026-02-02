@@ -1,4 +1,4 @@
-import 'package:depart/pages/acceuil.dart';
+import 'package:depart/pages/Bienvenue/acceuil.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 

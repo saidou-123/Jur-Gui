@@ -3,10 +3,9 @@
 // Fichier: lib/pages/Interface/interfaceEleveur.dart
 // ============================================================
 
-import 'package:depart/Eleveures/Accouplemaent/ANI/AnimalAchateBluetooth.dart';
-import 'package:depart/Eleveures/Accouplemaent/ANI/NouveauNeeBluetooth.dart';
+import 'package:depart/Eleveures/Ajouter%20Animal/AnimalAchateBluetooth.dart';
+import 'package:depart/Eleveures/Ajouter%20Animal/NouveauNeeBluetooth.dart';
 import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDBluetooth.dart';
-import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDPage.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:depart/Eleveures/Accouplemaent/EnregistrerAccouplement.dart';
@@ -16,7 +15,7 @@ import 'package:depart/widgets/optioncardEleveur.dart';
 import 'package:depart/securite/ErrorHandler.dart';
 import 'package:depart/securite/CachedData.dart';
 import 'package:depart/widgets/couleur.dart';
-import 'package:depart/pages/connexion.dart';
+import 'package:depart/pages/Bienvenue/connexion.dart';
 
 class interfaceElevaur extends StatefulWidget {
   const interfaceElevaur({super.key});

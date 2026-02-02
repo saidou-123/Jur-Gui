@@ -1,5 +1,5 @@
 
-import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDPage.dart';
+import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDBluetooth.dart';
 import 'package:depart/Eleveures/Mon%20Troupeau/SupprimerAnimal/AnimalDeletePage.dart';
 import 'package:depart/Eleveures/Mon%20Troupeau/ModfierAnimal/AnimalListPage.dart';
 import 'package:depart/Eleveures/Mon%20Troupeau/HistoriqueMedicalEleveur.dart';
@@ -163,7 +163,7 @@ class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStat
             () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const  AnimalInfoRFIDPage()),
+                MaterialPageRoute(builder: (context) => const  AnimalInfoRFIDPageBluetooth ()),
               );
             },
           ),

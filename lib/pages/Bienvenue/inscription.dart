@@ -3,7 +3,7 @@
 // Fichier: lib/pages/inscription.dart
 // ============================================================
 
-import 'package:depart/pages/connexion.dart';
+import 'package:depart/pages/Bienvenue/connexion.dart';
 import 'package:depart/securite/ErrorHandler.dart';
 import 'package:depart/securite/Validators.dart';
 import 'package:depart/widgets/couleur.dart';

@@ -3,9 +3,9 @@
 // Fichier: lib/pages/connexion.dart
 // ============================================================
 
-import 'package:depart/pages/Interface/interfaceElevaur.dart';
+import 'package:depart/pages/Interface/interfaceEleveur/interfaceElevaur.dart';
 import 'package:depart/pages/Interface/interfaceVeterinaire/interfaceVeterinaire.dart';
-import 'package:depart/pages/inscription.dart';
+import 'package:depart/pages/Bienvenue/inscription.dart';
 import 'package:depart/securite/ErrorHandler.dart';
 import 'package:depart/securite/Validators.dart';
 import 'package:depart/widgets/couleur.dart';

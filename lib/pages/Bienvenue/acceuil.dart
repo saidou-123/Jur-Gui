@@ -3,7 +3,7 @@
 // Fichier: lib/pages/acceuil.dart
 // ============================================================
 
-import 'package:depart/pages/connexion.dart';
+import 'package:depart/pages/Bienvenue/connexion.dart';
 import 'package:depart/widgets/couleur.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
