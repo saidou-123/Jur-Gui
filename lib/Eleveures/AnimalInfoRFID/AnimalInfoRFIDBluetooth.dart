@@ -182,7 +182,7 @@ class _AnimalInfoRFIDPageBluetoothState extends State<AnimalInfoRFIDPageBluetoot
       await _stopBLEScan();
       
       debugPrint("🔗 Connexion à ${device.platformName}...");
-      _showSnackBar("🔗 Connexion au lecteur....", Colors.blue);
+      _showSnackBar("🔗 Connexion au lecteur.....", Colors.blue);
 
       // Se connecter à l'appareil
       await device.connect(
