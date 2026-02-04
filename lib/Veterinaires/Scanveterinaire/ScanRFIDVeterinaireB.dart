@@ -5,15 +5,15 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-class ScanRFIDVeterinaireBLUETOOTH extends StatefulWidget {
-  const ScanRFIDVeterinaireBLUETOOTH({super.key});
+class ScanRFIDVeterinaireBluetooth extends StatefulWidget {
+  const ScanRFIDVeterinaireBluetooth({super.key});
 
   @override
-  State<ScanRFIDVeterinaireBLUETOOTH> createState() => _ScanRFIDVeterinaireBLUETOOTHState();
+  State<ScanRFIDVeterinaireBluetooth> createState() => _ScanRFIDVeterinaireBluetoothState();
 }
 
-class _ScanRFIDVeterinaireBLUETOOTHState extends State<ScanRFIDVeterinaireBLUETOOTH> {
-  // ========== ScanRFIDVeterinaireBLUETOOTHBLUETOOTH BLE ==========
+class _ScanRFIDVeterinaireBluetoothState extends State<ScanRFIDVeterinaireBluetooth> {
+  // ========== ScanRFIDVeterinaireBluetoothBLUETOOTH BLE ==========
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _rfidCharacteristic;
   bool _isScanning = false;
