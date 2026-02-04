@@ -171,7 +171,7 @@ class _AnimalInfoRFIDPageBluetoothState extends State<AnimalInfoRFIDPageBluetoot
       setState(() => _isScanning = false);
     }
     
-    debugPrint("🛑 Scan BLE arrêtée");
+    debugPrint("🛑 Scan BLE arrêtéee");
   }
 
   // =====================================================
