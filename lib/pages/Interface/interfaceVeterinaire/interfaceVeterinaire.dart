@@ -522,7 +522,7 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        "Accédez aux dossiers médicaux",
+                        "Accédez aux dossiers médicaux d",
                         style: TextStyle(
                           color: Colors.white.withOpacity(0.9),
                           fontSize: 14,
