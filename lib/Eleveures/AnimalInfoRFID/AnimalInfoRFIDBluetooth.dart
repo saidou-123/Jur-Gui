@@ -88,7 +88,7 @@ class _AnimalInfoRFIDPageBluetoothState extends State<AnimalInfoRFIDPageBluetoot
       _startBLEScan();
       
     } catch (e, stackTrace) {
-      debugPrint("❌ Erreur Init Bluetooth: $e");
+      debugPrint("❌ Erreur Init Bluetoothss: $e");
       debugPrint("Stack trace: $stackTrace");
       if (mounted) {
         _showSnackBar("❌ Erreur Bluetooth: $e", Colors.red);
