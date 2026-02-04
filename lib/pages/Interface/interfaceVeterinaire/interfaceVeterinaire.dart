@@ -535,7 +535,7 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => const ScanRFIDVeterinaireBLUETOOTH (),
+                          builder: (context) => const ScanRFIDVeterinaireBluetooth (),
                         ),
                       );
                     },
