@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ============================================================ -->
+<!-- android/app/src/main/res/raw/keep.xml -->
+<!-- Fichier pour empêcher R8 de supprimer les ressources -->
+<!-- ============================================================ -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/*,@raw/*,@mipmap/*" />

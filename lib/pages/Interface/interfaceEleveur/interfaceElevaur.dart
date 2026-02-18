@@ -1,15 +1,17 @@
 // ============================================================
-// INTERFACE ÉLEVEUR - VERSION OPTIMISÉE
+// INTERFACE ÉLEVEUR - VERSION PRODUCTION (SANS TESTS)
 // Fichier: lib/pages/Interface/interfaceEleveur.dart
 // ============================================================
 
-import 'package:depart/Eleveures/Ajouter%20Animal/AnimalAchateBluetooth.dart';
+import 'package:depart/Eleveures/AccouplemaentAncien/EnregistrerAccouplement.dart';
 import 'package:depart/Eleveures/Ajouter%20Animal/NouveauNeeBluetooth.dart';
 import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDBluetooth.dart';
+import 'package:depart/Eleveures/New/Accouplemt/Accouplement.dart';
+import 'package:depart/Eleveures/New/Notification/NotificationsViewPage.dart';
+import 'package:depart/Eleveures/New/chaleur/ChaleurModule.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:depart/Eleveures/Accouplemaent/EnregistrerAccouplement.dart';
-import 'package:depart/Eleveures/Chaleur/Chaleur.dart';
+import 'package:depart/Eleveures/ChaleurAncien/Chaleur.dart';
 import 'package:depart/Eleveures/Mon%20Troupeau/Mon_Troupeau.dart';
 import 'package:depart/widgets/optioncardEleveur.dart';
 import 'package:depart/securite/ErrorHandler.dart';
@@ -114,7 +116,6 @@ class _interfaceElevaureState extends State<interfaceElevaur>
       }
     } catch (e) {
       debugPrint("⚠️ Erreur chargement utilisateur: $e");
-      // Utiliser valeurs par défaut
       setState(() {
         _userName = "Éleveur";
         _userEmail = _supabase.auth.currentUser?.email ?? "";
@@ -554,7 +555,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => const AnimalInfoRFIDPageBluetooth (),
+                          builder: (context) => const AnimalInfoRFIDPageBluetooth(),
                         ),
                       );
                     },
@@ -639,7 +640,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               child: optioncardEleveur(
                 image: 'assets/image/img10.png',
                 label: 'Période Chaleur',
-                route: const Chaleur(),
+                route: const ChaleurModule(),
                 backgroundColor: const Color(0xFFFFF3E0),
               ),
             ),
@@ -652,7 +653,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               child: optioncardEleveur(
                 image: 'assets/image/img5.png',
                 label: "Accouplement",
-                route: const EnregistrerAccouplementPage(),
+                route: const EnregistrerAccouplement(),
                 backgroundColor: const Color(0xFFFCE4EC),
               ),
             ),
@@ -661,7 +662,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               child: optioncardEleveur(
                 image: 'assets/image/img14.png',
                 label: 'Ajouter Animal',
-                route: const  NouveauNeeBluetooth (),
+                route: const NouveauNeeBluetooth(),
                 backgroundColor: const Color(0xFFFFF9C4),
               ),
             ),
@@ -673,8 +674,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
             Expanded(
               child: optioncardEleveur(
                 image: 'assets/image/img5.png',
-                label: "Historique Médical",
-                route: const AnimalAchateBluetooth (),
+                label: "Mes Notifications",
+                route: const NotificationsViewPage(),
                 backgroundColor: const Color(0xFFE3F2FD),
               ),
             ),
@@ -731,6 +732,19 @@ class _interfaceElevaureState extends State<interfaceElevaur>
             onTap: () {
               Navigator.pop(context);
               _handleRefresh();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.notifications, color: Colors.blue),
+            title: const Text("Mes Notifications"),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const NotificationsViewPage(),
+                ),
+              );
             },
           ),
           const Divider(),

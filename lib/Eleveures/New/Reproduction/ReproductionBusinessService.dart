@@ -1,0 +1,560 @@
+// ============================================================
+// SERVICE MÉTIER REPRODUCTION
+// Logique métier et règles de validation
+// ============================================================
+
+import 'package:depart/Eleveures/New/Reproduction/ReproductionConfig.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+
+class ReproductionBusinessService {
+  static final ReproductionBusinessService _instance = 
+      ReproductionBusinessService._internal();
+  factory ReproductionBusinessService() => _instance;
+  ReproductionBusinessService._internal();
+  
+  final supabase = Supabase.instance.client;
+  
+  // ===== VALIDATION CHALEUR =====
+  
+  /// Vérifier si une brebis peut entrer en chaleur
+  Future<ValidationResult> peutEnregistrerChaleur({
+    required dynamic brebisId,
+    required String source,
+    required DateTime dateChaleur,
+  }) async {
+    try {
+      // 1. Vérifier si gestante
+      final estGestante = await _estGestante(brebisId, source);
+      if (estGestante) {
+        return ValidationResult(
+          isValid: false,
+          message: ReproductionConfig.messageGestante,
+          code: 'GESTANTE',
+        );
+      }
+      
+      // 2. Vérifier l'âge minimum (si nouveau-né)
+      if (source == 'nee') {
+        final estAssezAgee = await _verifierAgeMinimum(brebisId);
+        if (!estAssezAgee) {
+          return ValidationResult(
+            isValid: false,
+            message: ReproductionConfig.messageTropJeune,
+            code: 'TROP_JEUNE',
+          );
+        }
+      }
+      
+      // 3. Vérifier intervalle avec dernière chaleur
+      final intervalleValide = await _verifierIntervalleChaleur(
+        brebisId,
+        source,
+        dateChaleur,
+      );
+      
+      if (!intervalleValide.isValid) {
+        return intervalleValide;
+      }
+      
+      return ValidationResult(isValid: true, message: 'OK');
+    } catch (e) {
+      return ValidationResult(
+        isValid: false,
+        message: 'Erreur validation: $e',
+        code: 'ERREUR',
+      );
+    }
+  }
+  
+  /// Calculer prochaine chaleur prévue
+  Future<PredictionChaleur> calculerProchaineChaleur({
+    required dynamic brebisId,
+    required String source,
+    required DateTime derniereChaleur,
+  }) async {
+    try {
+      // Récupérer historique
+      final historique = await supabase
+          .from('chaleurs')
+          .select('date_chaleur')
+          .eq('animal_id', brebisId)
+          .eq('source', source)
+          .order('date_chaleur', ascending: false)
+          .limit(5);
+      
+      // Calculer cycle moyen si plusieurs chaleurs
+      int cycleMoyen = ReproductionConfig.cycleMoyenJours;
+      bool cycleIrregulier = false;
+      
+      if (historique.length >= 2) {
+        List<int> intervalles = [];
+        for (int i = 0; i < historique.length - 1; i++) {
+          final date1 = DateTime.parse(historique[i]['date_chaleur']);
+          final date2 = DateTime.parse(historique[i + 1]['date_chaleur']);
+          intervalles.add(date1.difference(date2).inDays);
+        }
+        
+        // Moyenne
+        cycleMoyen = (intervalles.reduce((a, b) => a + b) / intervalles.length).round();
+        
+        // Vérifier régularité
+        final ecartType = _calculerEcartType(intervalles);
+        cycleIrregulier = ecartType > 3; // Plus de 3 jours d'écart
+      }
+      
+      // Vérifier saison
+      final mois = DateTime.now().month;
+      final estAnoestrus = mois >= 6 && mois <= 8;
+      
+      // Vérifier lactation
+      final enLactation = await _estEnLactation(brebisId, source);
+      
+      // Calculer dates prévues
+      final prochaineMin = derniereChaleur.add(Duration(days: cycleMoyen - 2));
+      final prochaineMax = derniereChaleur.add(Duration(days: cycleMoyen + 2));
+      
+      // Niveau de confiance
+      final confiance = ReproductionConfig.getNiveauConfiance(
+        enLactation: enLactation,
+        cycleIrregulier: cycleIrregulier,
+        anoestrus: estAnoestrus,
+        recentSevrage: false, // À implémenter si nécessaire
+      );
+      
+      return PredictionChaleur(
+        dateMin: prochaineMin,
+        dateMax: prochaineMax,
+        cycleMoyen: cycleMoyen,
+        niveauConfiance: confiance,
+        cycleIrregulier: cycleIrregulier,
+        estAnoestrus: estAnoestrus,
+        enLactation: enLactation,
+      );
+    } catch (e) {
+      print('❌ Erreur calcul prochaine chaleur: $e');
+      rethrow;
+    }
+  }
+  
+  // ===== VALIDATION ACCOUPLEMENT =====
+  
+  /// Vérifier si un accouplement est possible
+  Future<ValidationResult> peutAccoupler({
+    required dynamic brebisId,
+    required String sourceBrebis,
+    required dynamic belierId,
+    required String sourceBelier,
+    required DateTime dateAccouplement,
+  }) async {
+    try {
+      // 1. Vérifier si brebis gestante
+      final estGestante = await _estGestante(brebisId, sourceBrebis);
+      if (estGestante) {
+        return ValidationResult(
+          isValid: false,
+          message: 'Cette brebis est déjà gestante',
+          code: 'GESTANTE',
+        );
+      }
+      
+      // 2. Vérifier chaleur récente (dans les 48h)
+      final chaleurRecente = await _aChaleurRecente(
+        brebisId,
+        sourceBrebis,
+        dateAccouplement,
+      );
+      
+      if (!chaleurRecente) {
+        return ValidationResult(
+          isValid: false,
+          message: 'Aucune chaleur enregistrée dans les 48h précédentes. '
+                  'Enregistrez d\'abord une chaleur.',
+          code: 'PAS_DE_CHALEUR',
+          severity: 'warning',
+        );
+      }
+      
+      // 3. Vérifier intervalle minimum entre accouplements
+      final dernierAccouplement = await supabase
+          .from('accouplements')
+          .select('date_accouplement')
+          .eq('brebis_id', brebisId)
+          .eq('source_brebis', sourceBrebis)
+          .order('date_accouplement', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      
+      if (dernierAccouplement != null) {
+        final derniere = DateTime.parse(dernierAccouplement['date_accouplement']);
+        final joursDifference = dateAccouplement.difference(derniere).inDays;
+        
+        if (joursDifference < ReproductionConfig.joursMinEntreAccouplements) {
+          return ValidationResult(
+            isValid: false,
+            message: 'Intervalle trop court depuis le dernier accouplement '
+                    '($joursDifference jours, minimum ${ReproductionConfig.joursMinEntreAccouplements} jours)',
+            code: 'INTERVALLE_COURT',
+          );
+        }
+      }
+      
+      // 4. Vérifier consanguinité (si même source)
+      if (sourceBrebis == sourceBelier) {
+        final consanguinite = await _verifierConsanguinite(
+          brebisId,
+          belierId,
+          sourceBrebis,
+        );
+        
+        if (consanguinite.isConsanguin) {
+          return ValidationResult(
+            isValid: true, // Warning, pas bloquant
+            message: '⚠️ Attention: ${consanguinite.degre} détecté. '
+                    'Risque de consanguinité.',
+            code: 'CONSANGUINITE',
+            severity: 'warning',
+          );
+        }
+      }
+      
+      return ValidationResult(isValid: true, message: 'OK');
+    } catch (e) {
+      return ValidationResult(
+        isValid: false,
+        message: 'Erreur validation: $e',
+        code: 'ERREUR',
+      );
+    }
+  }
+  
+  /// Calculer date prévue d'agnelage
+  DateTime calculerDateAgnelage(DateTime dateAccouplement) {
+    return dateAccouplement.add(
+      Duration(days: ReproductionConfig.gestationMoyenneJours),
+    );
+  }
+  
+  /// Calculer fourchette agnelage
+  Map<String, DateTime> calculerFourchetteAgnelage(DateTime dateAccouplement) {
+    return {
+      'min': dateAccouplement.add(
+        Duration(days: ReproductionConfig.gestationMinJours),
+      ),
+      'max': dateAccouplement.add(
+        Duration(days: ReproductionConfig.gestationMaxJours),
+      ),
+      'prevue': calculerDateAgnelage(dateAccouplement),
+    };
+  }
+  
+  // ===== STATISTIQUES =====
+  
+  /// Calculer taux de fertilité d'une brebis
+  Future<double> calculerTauxFertiliteBrebis({
+    required dynamic brebisId,
+    required String source,
+  }) async {
+    try {
+      final accouplements = await supabase
+          .from('accouplements')
+          .select('id, date_mise_bas')
+          .eq('brebis_id', brebisId)
+          .eq('source_brebis', source);
+      
+      if (accouplements.isEmpty) return 0.0;
+      
+      final accouplementsReussis = accouplements
+          .where((a) => a['date_mise_bas'] != null)
+          .length;
+      
+      return accouplementsReussis / accouplements.length;
+    } catch (e) {
+      print('❌ Erreur calcul taux fertilité: $e');
+      return 0.0;
+    }
+  }
+  
+  /// Calculer statistiques globales élevage
+  Future<StatistiquesReproduction> calculerStatistiquesGlobales(String userId) async {
+    try {
+      // Nombre total d'accouplements
+      final accouplements = await supabase
+          .from('accouplements')
+          .select('id, date_accouplement, date_mise_bas')
+          .eq('user_id', userId);
+      
+      final totalAccouplements = accouplements.length;
+      final accouplementsReussis = accouplements
+          .where((a) => a['date_mise_bas'] != null)
+          .length;
+      
+      final tauxFertilite = totalAccouplements > 0
+          ? accouplementsReussis / totalAccouplements
+          : 0.0;
+      
+      // Chaleurs enregistrées ce mois
+      final debutMois = DateTime(DateTime.now().year, DateTime.now().month, 1);
+      final finMois = DateTime(DateTime.now().year, DateTime.now().month + 1, 0);
+      
+      final chaleursMois = await supabase
+          .from('chaleurs')
+          .select('id')
+          .eq('user_id', userId)
+          .gte('date_chaleur', debutMois.toIso8601String())
+          .lte('date_chaleur', finMois.toIso8601String());
+      
+      // Agnelages attendus (30 prochains jours)
+      final dans30Jours = DateTime.now().add(const Duration(days: 30));
+      final agnelagesAttendus = await supabase
+          .from('accouplements')
+          .select('id')
+          .eq('user_id', userId)
+          .isFilter('date_mise_bas', null)
+          .lte('date_prevue_agnelage', dans30Jours.toIso8601String())
+          .gte('date_prevue_agnelage', DateTime.now().toIso8601String());
+      
+      return StatistiquesReproduction(
+        totalAccouplements: totalAccouplements,
+        accouplementsReussis: accouplementsReussis,
+        tauxFertilite: tauxFertilite,
+        chaleursCeMois: chaleursMois.length,
+        agnelagesAttendus30j: agnelagesAttendus.length,
+      );
+    } catch (e) {
+      print('❌ Erreur calcul statistiques: $e');
+      return StatistiquesReproduction(
+        totalAccouplements: 0,
+        accouplementsReussis: 0,
+        tauxFertilite: 0.0,
+        chaleursCeMois: 0,
+        agnelagesAttendus30j: 0,
+      );
+    }
+  }
+  
+  // ===== FONCTIONS PRIVÉES =====
+  
+  Future<bool> _estGestante(dynamic brebisId, String source) async {
+    final accouplement = await supabase
+        .from('accouplements')
+        .select('date_mise_bas')
+        .eq('brebis_id', brebisId)
+        .eq('source_brebis', source)
+        .isFilter('date_mise_bas', null)
+        .limit(1)
+        .maybeSingle();
+    
+    return accouplement != null;
+  }
+  
+  Future<bool> _estEnLactation(dynamic brebisId, String source) async {
+    final accouplement = await supabase
+        .from('accouplements')
+        .select('date_mise_bas')
+        .eq('brebis_id', brebisId)
+        .eq('source_brebis', source)
+        .order('date_mise_bas', ascending: false)
+        .limit(1)
+        .maybeSingle();
+    
+    if (accouplement == null || accouplement['date_mise_bas'] == null) {
+      return false;
+    }
+    
+    final dateMiseBas = DateTime.parse(accouplement['date_mise_bas']);
+    final joursDepuis = DateTime.now().difference(dateMiseBas).inDays;
+    
+    return joursDepuis < ReproductionConfig.dureeLactationJours;
+  }
+  
+  Future<bool> _verifierAgeMinimum(int brebisId) async {
+    final brebis = await supabase
+        .from('nouveaux_nee')
+        .select('date_naissance')
+        .eq('id', brebisId)
+        .single();
+    
+    final dateNaissance = DateTime.parse(brebis['date_naissance']);
+    final moisAge = DateTime.now().difference(dateNaissance).inDays ~/ 30;
+    
+    return moisAge >= ReproductionConfig.ageMinimumReproductionMois;
+  }
+  
+  Future<ValidationResult> _verifierIntervalleChaleur(
+    dynamic brebisId,
+    String source,
+    DateTime nouvelleChaleur,
+  ) async {
+    final derniere = await supabase
+        .from('chaleurs')
+        .select('date_chaleur')
+        .eq('animal_id', brebisId)
+        .eq('source', source)
+        .order('date_chaleur', ascending: false)
+        .limit(1)
+        .maybeSingle();
+    
+    if (derniere == null) {
+      return ValidationResult(isValid: true, message: 'OK');
+    }
+    
+    final dateDerniere = DateTime.parse(derniere['date_chaleur']);
+    final intervalleJours = nouvelleChaleur.difference(dateDerniere).inDays;
+    
+    if (intervalleJours < ReproductionConfig.cycleMinJours) {
+      return ValidationResult(
+        isValid: true, // Warning mais pas bloquant
+        message: ReproductionConfig.messageIntervalleCourtChaleur,
+        code: 'INTERVALLE_COURT',
+        severity: 'warning',
+        data: {'intervalle': intervalleJours},
+      );
+    }
+    
+    if (intervalleJours > ReproductionConfig.cycleMaxJours) {
+      return ValidationResult(
+        isValid: true, // Warning mais pas bloquant
+        message: ReproductionConfig.messageIntervalleLongChaleur,
+        code: 'INTERVALLE_LONG',
+        severity: 'warning',
+        data: {'intervalle': intervalleJours},
+      );
+    }
+    
+    return ValidationResult(isValid: true, message: 'OK');
+  }
+  
+  Future<bool> _aChaleurRecente(
+    dynamic brebisId,
+    String source,
+    DateTime dateAccouplement,
+  ) async {
+    final chaleur = await supabase
+        .from('chaleurs')
+        .select('date_chaleur')
+        .eq('animal_id', brebisId)
+        .eq('source', source)
+        .gte('date_chaleur', 
+            dateAccouplement.subtract(const Duration(hours: 48)).toIso8601String())
+        .lte('date_chaleur', dateAccouplement.toIso8601String())
+        .limit(1)
+        .maybeSingle();
+    
+    return chaleur != null;
+  }
+  
+  Future<ConsanguiniteResult> _verifierConsanguinite(
+    dynamic brebisId,
+    dynamic belierId,
+    String source,
+  ) async {
+    // Vérifier si même mère ou père
+    if (source == 'nee') {
+      final brebis = await supabase
+          .from('nouveaux_nee')
+          .select('mere_id, pere_id')
+          .eq('id', brebisId)
+          .single();
+      
+      final belier = await supabase
+          .from('nouveaux_nee')
+          .select('mere_id, pere_id')
+          .eq('id', belierId)
+          .single();
+      
+      // Frère et sœur
+      if (brebis['mere_id'] == belier['mere_id'] && brebis['mere_id'] != null) {
+        return ConsanguiniteResult(
+          isConsanguin: true,
+          degre: 'Frère et sœur',
+        );
+      }
+      
+      // Parent-enfant
+      if (brebis['pere_id'] == belierId || brebis['mere_id'] == belierId) {
+        return ConsanguiniteResult(
+          isConsanguin: true,
+          degre: 'Parent-enfant',
+        );
+      }
+    }
+    
+    return ConsanguiniteResult(isConsanguin: false);
+  }
+  
+  double _calculerEcartType(List<int> valeurs) {
+    if (valeurs.isEmpty) return 0.0;
+    
+    final moyenne = valeurs.reduce((a, b) => a + b) / valeurs.length;
+    final sommeCares = valeurs
+        .map((v) => (v - moyenne) * (v - moyenne))
+        .reduce((a, b) => a + b);
+    
+    return (sommeCares / valeurs.length).abs();
+  }
+}
+
+// ===== MODÈLES =====
+
+class ValidationResult {
+  final bool isValid;
+  final String message;
+  final String? code;
+  final String severity; // 'error', 'warning', 'info'
+  final Map<String, dynamic>? data;
+  
+  ValidationResult({
+    required this.isValid,
+    required this.message,
+    this.code,
+    this.severity = 'error',
+    this.data,
+  });
+}
+
+class PredictionChaleur {
+  final DateTime dateMin;
+  final DateTime dateMax;
+  final int cycleMoyen;
+  final String niveauConfiance;
+  final bool cycleIrregulier;
+  final bool estAnoestrus;
+  final bool enLactation;
+  
+  PredictionChaleur({
+    required this.dateMin,
+    required this.dateMax,
+    required this.cycleMoyen,
+    required this.niveauConfiance,
+    required this.cycleIrregulier,
+    required this.estAnoestrus,
+    required this.enLactation,
+  });
+}
+
+class ConsanguiniteResult {
+  final bool isConsanguin;
+  final String? degre;
+  
+  ConsanguiniteResult({
+    required this.isConsanguin,
+    this.degre,
+  });
+}
+
+class StatistiquesReproduction {
+  final int totalAccouplements;
+  final int accouplementsReussis;
+  final double tauxFertilite;
+  final int chaleursCeMois;
+  final int agnelagesAttendus30j;
+  
+  StatistiquesReproduction({
+    required this.totalAccouplements,
+    required this.accouplementsReussis,
+    required this.tauxFertilite,
+    required this.chaleursCeMois,
+    required this.agnelagesAttendus30j,
+  });
+}

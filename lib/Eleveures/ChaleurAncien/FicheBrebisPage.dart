@@ -1,4 +1,4 @@
-import 'package:depart/Eleveures/Chaleur/EnregistrerChaleurPage.dart';
+import 'package:depart/Eleveures/ChaleurAncien/EnregistrerChaleurPage.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 // ============================================================
