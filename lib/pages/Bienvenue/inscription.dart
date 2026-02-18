@@ -299,7 +299,7 @@ class _InscriptionState extends State<Inscription> {
         ),
         const SizedBox(height: 8),
         Text(
-          "Connectez-vouss à Jur Gui 4.0",
+          "Connectez-vous à Jur Gui 4.0",
           style: TextStyle(
             fontSize: 16,
             color: Colors.grey[600],
