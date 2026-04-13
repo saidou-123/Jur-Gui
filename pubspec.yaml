@@ -51,6 +51,8 @@ dependencies:
     # Bluetooth
   flutter_blue_plus: ^1.32.0
   permission_handler: ^11.0.1 
+  fl_chart: ^1.1.1
+  
   
 
 

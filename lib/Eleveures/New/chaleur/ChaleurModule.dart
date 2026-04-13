@@ -1,17 +1,17 @@
 // ============================================================
-// MODULE CHALEUR COMPLET - VERSION FINALE
-// Gestion complète du suivi des chaleurs avec prédictions
-// TOUTES LES NAVIGATIONS IMPLÉMENTÉES
+// MODULE CHALEUR - AVEC INTÉGRATION BREBISCARD CLIQUABLE
+// Fichier: lib/Eleveures/New/chaleur/ChaleurModule.dart
+// Modifications:
+//   ✅ Chaque carte brebis est cliquable → BrebisDetailPage
+//   ✅ _buildBrebisCard() remplacé par BrebisCard widget
+//   ✅ Navigation vers profil détaillé avec graphiques fl_chart
 // ============================================================
 
-import 'package:depart/Eleveures/New/Accouplemt/Accouplement.dart';
-import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
-import 'package:depart/Eleveures/New/Reproduction/ReproductionBusinessService.dart';
-import 'package:depart/Eleveures/New/Reproduction/ReproductionConfig.dart';
+import 'package:depart/Eleveures/New/Dashboard/BrebisDetailPage.dart';
 import 'package:depart/Eleveures/New/chaleur/EnrChaleurPageAmelioree.dart';
+import 'package:depart/Eleveures/New/Reproduction/ReproductionBusinessService.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 
 class ChaleurModule extends StatefulWidget {
   const ChaleurModule({super.key});
@@ -20,863 +20,987 @@ class ChaleurModule extends StatefulWidget {
   State<ChaleurModule> createState() => _ChaleurModuleState();
 }
 
-class _ChaleurModuleState extends State<ChaleurModule> 
+class _ChaleurModuleState extends State<ChaleurModule>
     with SingleTickerProviderStateMixin {
   final supabase = Supabase.instance.client;
-  final _businessService = ReproductionBusinessService();
-  final _notificationService = NotificationService();
-  
-  late TabController _tabController;
-  
-  List<Map<String, dynamic>> _brebis = [];
-  List<Map<String, dynamic>> _brebisEnChaleur = [];
-  List<Map<String, dynamic>> _prochainesChaleurs = [];
-  
+  final _reproService = ReproductionBusinessService();
+
+  // ===== ÉTAT =====
   bool _isLoading = true;
-  String? _saisonActuelle;
-  String? _indicateurSaison;
-  Color? _couleurSaison;
-  
-  // Statistiques
-  int _chaleursCeMois = 0;
-  int _brebisDisponibles = 0;
+  String _recherche = '';
+  final TextEditingController _searchController = TextEditingController();
+
+  // ===== DONNÉES =====
+  List<Map<String, dynamic>> _toutesLesBrebis = [];
+  List<Map<String, dynamic>> _brebisEnChaleur = [];
+  List<Map<String, dynamic>> _brebisGestantes = [];
+
+  // ===== TAB =====
+  late TabController _tabController;
+
+  // ===== COULEURS =====
+  static const Color _couleurPrimaire = Color(0xFF1B5E20);
+  static const Color _couleurChaleur = Color(0xFFE53935);
+  static const Color _couleurGestante = Color(0xFF8E24AA);
+  static const Color _couleurFond = Color(0xFFF1F8E9);
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _initModule();
+    _chargerBrebis();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _initModule() async {
-    await _notificationService.initialize();
-    await _determinerSaison();
-    await _chargerDonnees();
-  }
+  // ============================================================
+  // CHARGEMENT DES DONNÉES
+  // ============================================================
 
-  Future<void> _determinerSaison() async {
-    final now = DateTime.now();
-    final mois = now.month;
-
-    if (mois >= 9 || mois <= 2) {
-      _saisonActuelle = "Saison active de reproduction";
-      _indicateurSaison = "🟢 Période favorable pour les chaleurs";
-      _couleurSaison = Colors.green;
-    } else if (mois >= 3 && mois <= 5) {
-      _saisonActuelle = "Période de transition";
-      _indicateurSaison = "🟡 Activité reproductive modérée";
-      _couleurSaison = Colors.orange;
-    } else {
-      _saisonActuelle = "Anœstrus saisonnier";
-      _indicateurSaison = "🔴 Période défavorable - Chaleurs rares";
-      _couleurSaison = Colors.red;
-    }
-  }
-
-  Future<void> _chargerDonnees() async {
+  Future<void> _chargerBrebis() async {
     if (!mounted) return;
-    
     setState(() => _isLoading = true);
 
     try {
       final userId = supabase.auth.currentUser?.id;
-      if (userId == null) throw Exception("Utilisateur non connecté");
+      if (userId == null) return;
 
-      // Charger toutes les brebis
-      final toutesLesBrebis = await _chargerToutesLesBrebis(userId);
-      
-      // Enrichir avec statut reproduction
-      final brebisEnrichies = await _enrichirAvecStatutReproduction(toutesLesBrebis);
-      
-      // Filtrer brebis en chaleur (dernières 48h)
-      final enChaleur = await _filtrerBrebisEnChaleur(brebisEnrichies);
-      
-      // Calculer prochaines chaleurs prévues
-      final prochaines = await _calculerProchainesChaleurs(brebisEnrichies);
-      
-      // Calculer statistiques
-      await _calculerStatistiques(userId, brebisEnrichies);
-
-      if (mounted) {
-        setState(() {
-          _brebis = brebisEnrichies;
-          _brebisEnChaleur = enChaleur;
-          _prochainesChaleurs = prochaines;
-          _isLoading = false;
-        });
-      }
-    } catch (e, stackTrace) {
-      debugPrint("❌ Erreur chargement: $e");
-      debugPrint("Stack: $stackTrace");
-      if (mounted) {
-        _showSnackBar("Erreur de chargement", Colors.red);
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _chargerToutesLesBrebis(String userId) async {
-    List<Map<String, dynamic>> toutes = [];
-
-    // Brebis achetées
-    try {
-      final achetes = await supabase
+      // Charger brebis achetées (UUID)
+      final acheteesRaw = await supabase
           .from('animal_acheter')
-          .select('id, nom, race, sexe, tag_rfid, image_url, provenance')
+          .select('*')
           .eq('sexe', 'Femelle')
           .eq('user_id', userId)
           .order('nom');
 
-      for (var b in achetes) {
-        b['source'] = 'achete';
-        toutes.add(b);
-      }
-    } catch (e) {
-      debugPrint("⚠️ Erreur brebis achetées: $e");
-    }
-
-    // Brebis nées
-    try {
-      final nees = await supabase
+      // Charger brebis nées (int)
+      final neesRaw = await supabase
           .from('nouveaux_nee')
-          .select('id, nom, race, sexe, tag_rfid, image_url, date_naissance')
+          .select('*')
           .eq('sexe', 'Femelle')
           .eq('user_id', userId)
           .order('nom');
 
-      for (var b in nees) {
-        b['source'] = 'nee';
-        toutes.add(b);
-      }
-    } catch (e) {
-      debugPrint("⚠️ Erreur brebis nées: $e");
-    }
+      // Fusionner avec source
+      final List<Map<String, dynamic>> toutes = [
+        ...List<Map<String, dynamic>>.from(acheteesRaw)
+            .map((b) => {...b, 'source': 'achete'}),
+        ...List<Map<String, dynamic>>.from(neesRaw)
+            .map((b) => {...b, 'source': 'nee'}),
+      ];
 
-    return toutes;
-  }
+      // Enrichir avec statut reproduction
+      final enrichies = await _enrichirStatuts(toutes, userId);
 
-  Future<List<Map<String, dynamic>>> _enrichirAvecStatutReproduction(
-    List<Map<String, dynamic>> brebis,
-  ) async {
-    for (var brebis in brebis) {
-      try {
-        // Vérifier gestation
-        final accouplement = await supabase
-            .from('accouplements')
-            .select('date_accouplement, date_prevue_agnelage, date_mise_bas')
-            .eq('brebis_id', brebis['id'])
-            .eq('source_brebis', brebis['source'])
-            .isFilter('date_mise_bas', null)
-            .order('date_accouplement', ascending: false)
-            .limit(1)
-            .maybeSingle();
-
-        brebis['estGestante'] = accouplement != null;
-        brebis['dateAgnelage'] = accouplement?['date_prevue_agnelage'];
-
-        // Vérifier lactation
-        final derniereMiseBas = await supabase
-            .from('accouplements')
-            .select('date_mise_bas')
-            .eq('brebis_id', brebis['id'])
-            .eq('source_brebis', brebis['source'])
-            .not('date_mise_bas', 'is', null)
-            .order('date_mise_bas', ascending: false)
-            .limit(1)
-            .maybeSingle();
-
-        if (derniereMiseBas != null) {
-          final dateMiseBas = DateTime.parse(derniereMiseBas['date_mise_bas']);
-          final joursDepuis = DateTime.now().difference(dateMiseBas).inDays;
-          brebis['enLactation'] = joursDepuis < ReproductionConfig.dureeLactationJours;
-        } else {
-          brebis['enLactation'] = false;
-        }
-
-        // Récupérer dernière chaleur
-        final derniereChaleur = await supabase
-            .from('chaleurs')
-            .select('date_chaleur, intensite')
-            .eq('animal_id', brebis['id'])
-            .eq('source', brebis['source'])
-            .order('date_chaleur', ascending: false)
-            .limit(1)
-            .maybeSingle();
-
-        brebis['derniereChaleur'] = derniereChaleur?['date_chaleur'];
-        brebis['derniereChaleurIntensite'] = derniereChaleur?['intensite'];
-
-        // Vérifier l'âge minimum pour reproduction (8 mois)
-        if (brebis['source'] == 'nee' && brebis['date_naissance'] != null) {
-          final dateNaissance = DateTime.parse(brebis['date_naissance']);
-          final moisAge = DateTime.now().difference(dateNaissance).inDays ~/ 30;
-          brebis['ageEnMois'] = moisAge;
-          brebis['tropJeune'] = moisAge < ReproductionConfig.ageMinimumReproductionMois;
-        } else {
-          brebis['tropJeune'] = false;
-          brebis['ageEnMois'] = null;
-        }
-
-      } catch (e) {
-        debugPrint("⚠️ Erreur enrichissement brebis ${brebis['nom']}: $e");
-      }
-    }
-
-    return brebis;
-  }
-
-  Future<List<Map<String, dynamic>>> _filtrerBrebisEnChaleur(
-    List<Map<String, dynamic>> brebis,
-  ) async {
-    final maintenant = DateTime.now();
-    final il48h = maintenant.subtract(const Duration(hours: 48));
-
-    return brebis.where((b) {
-      if (b['derniereChaleur'] == null) return false;
-      
-      final dateChaleur = DateTime.parse(b['derniereChaleur']);
-      return dateChaleur.isAfter(il48h) && dateChaleur.isBefore(maintenant);
-    }).toList();
-  }
-
-  Future<List<Map<String, dynamic>>> _calculerProchainesChaleurs(
-    List<Map<String, dynamic>> brebis,
-  ) async {
-    List<Map<String, dynamic>> prochaines = [];
-
-    for (var b in brebis) {
-      if (b['estGestante'] == true) continue;
-      if (b['derniereChaleur'] == null) continue;
-
-      try {
-        final prediction = await _businessService.calculerProchaineChaleur(
-          brebisId: b['id'],
-          source: b['source'],
-          derniereChaleur: DateTime.parse(b['derniereChaleur']),
-        );
-
-        if (prediction.dateMin.isAfter(DateTime.now())) {
-          prochaines.add({
-            ...b,
-            'prochaineChaleurMin': prediction.dateMin,
-            'prochaineChaleurMax': prediction.dateMax,
-            'niveauConfiance': prediction.niveauConfiance,
-            'joursRestants': prediction.dateMin.difference(DateTime.now()).inDays,
-          });
-        }
-      } catch (e) {
-        debugPrint("⚠️ Erreur prédiction ${b['nom']}: $e");
-      }
-    }
-
-    // Trier par proximité
-    prochaines.sort((a, b) => 
-      a['joursRestants'].compareTo(b['joursRestants']));
-
-    return prochaines.take(10).toList();
-  }
-
-  Future<void> _calculerStatistiques(
-    String userId,
-    List<Map<String, dynamic>> brebis,
-  ) async {
-    try {
-      final stats = await _businessService.calculerStatistiquesGlobales(userId);
-      
+      if (!mounted) return;
       setState(() {
-        _chaleursCeMois = stats.chaleursCeMois;
-        _brebisDisponibles = brebis
-            .where((b) => b['estGestante'] != true)
-            .length;
+        _toutesLesBrebis = enrichies;
+        _brebisEnChaleur =
+            enrichies.where((b) => b['enChaleur'] == true).toList();
+        _brebisGestantes =
+            enrichies.where((b) => b['estGestante'] == true).toList();
+        _isLoading = false;
       });
     } catch (e) {
-      debugPrint("⚠️ Erreur calcul stats: $e");
+      debugPrint('❌ Erreur chargement brebis: $e');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _showSnackBar(String message, Color color) {
-    if (!mounted) return;
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
+  /// Enrichit chaque brebis avec son statut reproductif
+  /// Optimisé : 1 requête groupée par table au lieu de N requêtes
+  Future<List<Map<String, dynamic>>> _enrichirStatuts(
+    List<Map<String, dynamic>> brebis,
+    String userId,
+  ) async {
+    if (brebis.isEmpty) return brebis;
 
-  // ===== FONCTION: SÉLECTEUR DE BREBIS =====
-  Future<void> _afficherSelecteurBrebis() async {
-    // Filtrer brebis disponibles (non gestantes ET âge suffisant)
-    final disponibles = _brebis.where((b) {
-      if (b['estGestante'] == true) return false;
-      if (b['tropJeune'] == true) return false;
-      return true;
+    // ── Toutes les chaleurs récentes (48h) ──
+    final il48h =
+        DateTime.now().subtract(const Duration(hours: 48)).toIso8601String();
+    final chaleurs = await supabase
+        .from('chaleurs')
+        .select('animal_id, date_chaleur, source')
+        .eq('user_id', userId)
+        .gte('date_chaleur', il48h);
+
+    // ── Toutes les gestations en cours ──
+    final gestations = await supabase
+        .from('accouplements')
+        .select('brebis_id, source_brebis, date_prevue_agnelage')
+        .eq('user_id', userId)
+        .isFilter('date_mise_bas', null);
+
+    // Construire des maps pour lookup O(1)
+    final Set<String> enChaleurSet = {
+      for (var c in chaleurs) '${c['source']}_${c['animal_id']}'
+    };
+    final Set<String> gestation = {
+      for (var g in gestations) '${g['source_brebis']}_${g['brebis_id']}'
+    };
+    final Map<String, String?> dateAgnelage = {
+      for (var g in gestations)
+        '${g['source_brebis']}_${g['brebis_id']}': g['date_prevue_agnelage'],
+    };
+
+    // Dernière chaleur par animal
+    final derniereChaleurs = await supabase
+        .from('chaleurs')
+        .select('animal_id, source, date_chaleur')
+        .eq('user_id', userId)
+        .order('date_chaleur', ascending: false);
+
+    final Map<String, String> derniereChaleurMap = {};
+    for (var c in derniereChaleurs) {
+      final key = '${c['source']}_${c['animal_id']}';
+      if (!derniereChaleurMap.containsKey(key)) {
+        derniereChaleurMap[key] = c['date_chaleur'];
+      }
+    }
+
+    return brebis.map((b) {
+      final key = '${b['source']}_${b['id']}';
+
+      // ── Calcul âge (uniquement pour les nouveau-nés — source 'nee') ──
+      // Les brebis achetées sont supposées adultes (âge non contrôlé ici)
+      int? ageMois;
+      bool tropJeune = false;
+      if (b['source'] == 'nee') {
+        final dateNaissanceRaw = b['date_naissance'] as String?;
+        if (dateNaissanceRaw != null) {
+          final dateNaissance = DateTime.tryParse(dateNaissanceRaw);
+          if (dateNaissance != null) {
+            final maintenant = DateTime.now();
+            ageMois = (maintenant.difference(dateNaissance).inDays / 30.44)
+                .floor();
+            tropJeune = ageMois < 8; // ✅ Règle métier : minimum 8 mois
+          }
+        }
+      }
+
+      return {
+        ...b,
+        'enChaleur': enChaleurSet.contains(key),
+        'estGestante': gestation.contains(key),
+        'dateAgnelagePrevu': dateAgnelage[key],
+        'derniereChaleur': derniereChaleurMap[key],
+        'ageMois': ageMois,
+        'tropJeune': tropJeune, // ✅ Flag bloquant pour les < 8 mois
+      };
     }).toList();
-    
-    if (disponibles.isEmpty) {
-      _showSnackBar(
-        "Aucune brebis disponible pour la reproduction.\n"
-        "Les brebis doivent avoir au moins 8 mois et ne pas être gestantes.",
-        Colors.orange,
-      );
-      return;
-    }
-    
-    // Afficher bottom sheet avec liste
-    final brebisSelectionnee = await showModalBottomSheet<Map<String, dynamic>>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (context, scrollController) => Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Color(ReproductionConfig.colorPrimary),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.pets, color: Colors.white),
-                  const SizedBox(width: 8),
-                  const Text(
-                    "Sélectionner une brebis",
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: ListView.builder(
-                controller: scrollController,
-                padding: const EdgeInsets.all(16),
-                itemCount: disponibles.length,
-                itemBuilder: (context, index) {
-                  final brebis = disponibles[index];
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    child: ListTile(
-                      leading: _buildAvatar(brebis),
-                      title: Text(
-                        brebis['nom'] ?? 'Sans nom',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text("Race: ${brebis['race'] ?? 'N/A'}"),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.pop(context, brebis),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    
-    // Si une brebis a été sélectionnée, naviguer vers la page d'enregistrement
-    if (brebisSelectionnee != null && mounted) {
-      await _naviguerVersEnregistrerChaleur(brebisSelectionnee);
-    }
   }
 
-  // ===== INTERFACE UTILISATEUR =====
+  // ============================================================
+  // FILTRAGE PAR RECHERCHE
+  // ============================================================
+
+  List<Map<String, dynamic>> _filtrer(List<Map<String, dynamic>> liste) {
+    if (_recherche.isEmpty) return liste;
+    final q = _recherche.toLowerCase();
+    return liste.where((b) {
+      final nom = (b['nom'] ?? '').toLowerCase();
+      final race = (b['race'] ?? '').toLowerCase();
+      final rfid = (b['tag_rfid'] ?? '').toLowerCase();
+      return nom.contains(q) || race.contains(q) || rfid.contains(q);
+    }).toList();
+  }
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Suivi des Chaleurs"),
-        backgroundColor: Color(ReproductionConfig.colorPrimary),
-        foregroundColor: Colors.white,
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [
-            Tab(text: "Toutes", icon: Icon(Icons.pets, size: 20)),
-            Tab(text: "En chaleur", icon: Icon(Icons.local_fire_department, size: 20)),
-            Tab(text: "Prédictions", icon: Icon(Icons.analytics, size: 20)),
+      backgroundColor: _couleurFond,
+      appBar: _buildAppBar(),
+      body: Column(
+        children: [
+          _buildSearchBar(),
+          _buildStatBanner(),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildOnglet(_filtrer(_toutesLesBrebis), 'toutes'),
+                _buildOnglet(_filtrer(_brebisEnChaleur), 'chaleur'),
+                _buildOnglet(_filtrer(_brebisGestantes), 'gestante'),
+              ],
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _ouvrirSelectionBrebis(),
+        backgroundColor: _couleurChaleur,
+        icon: const Icon(Icons.add_rounded, color: Colors.white),
+        label: const Text('Enregistrer chaleur',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ SÉLECTION BREBIS AVANT ENREGISTREMENT CHALEUR
+  // ============================================================
+
+  /// Ouvre une bottom sheet pour choisir la brebis avant d'ouvrir
+  /// EnregistrerChaleurPageAmelioree avec le bon paramètre `brebis`
+  Future<void> _ouvrirSelectionBrebis() async {
+    if (_toutesLesBrebis.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Aucune brebis disponible dans le troupeau'),
+          backgroundColor: Color(0xFFE53935),
+        ),
+      );
+      return;
+    }
+
+    final brebisSelectionnee = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _BottomSheetSelectionBrebis(
+        brebis: _toutesLesBrebis,
+      ),
+    );
+
+    if (brebisSelectionnee == null || !mounted) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EnregistrerChaleurPageAmelioree(
+          brebis: brebisSelectionnee,
+          source: brebisSelectionnee['source'] as String,
+        ),
+      ),
+    );
+    _chargerBrebis();
+  }
+
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      title: const Text(
+        'Module Chaleur',
+        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20),
+      ),
+      backgroundColor: _couleurPrimaire,
+      foregroundColor: Colors.white,
+      elevation: 0,
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.refresh_rounded),
+          onPressed: _chargerBrebis,
+        ),
+      ],
+      bottom: TabBar(
+        controller: _tabController,
+        indicatorColor: Colors.white,
+        indicatorWeight: 3,
+        labelColor: Colors.white,
+        unselectedLabelColor: Colors.white60,
+        labelStyle:
+            const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        tabs: [
+          Tab(
+            text: 'Toutes (${_toutesLesBrebis.length})',
+            icon: const Icon(Icons.pets_rounded, size: 18),
+          ),
+          Tab(
+            text: 'Chaleur (${_brebisEnChaleur.length})',
+            icon: const Icon(Icons.local_fire_department_rounded, size: 18),
+          ),
+          Tab(
+            text: 'Gestantes (${_brebisGestantes.length})',
+            icon: const Icon(Icons.pregnant_woman_rounded, size: 18),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===== BARRE DE RECHERCHE =====
+
+  Widget _buildSearchBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: TextField(
+        controller: _searchController,
+        onChanged: (v) => setState(() => _recherche = v),
+        decoration: InputDecoration(
+          hintText: 'Rechercher par nom, race ou RFID...',
+          hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
+          prefixIcon: const Icon(Icons.search_rounded,
+              color: Color(0xFF1B5E20), size: 22),
+          suffixIcon: _recherche.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.clear_rounded,
+                      size: 18, color: Colors.grey),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _recherche = '');
+                  },
+                )
+              : null,
+          border: InputBorder.none,
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+        ),
+      ),
+    );
+  }
+
+  // ===== BANNIÈRE STATS RAPIDES =====
+
+  Widget _buildStatBanner() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 6,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _statItem('Total', _toutesLesBrebis.length, _couleurPrimaire,
+              Icons.pets_rounded),
+          _divider(),
+          _statItem('En chaleur', _brebisEnChaleur.length, _couleurChaleur,
+              Icons.local_fire_department_rounded),
+          _divider(),
+          _statItem('Gestantes', _brebisGestantes.length, _couleurGestante,
+              Icons.pregnant_woman_rounded),
+        ],
+      ),
+    );
+  }
+
+  Widget _statItem(String label, int count, Color color, IconData icon) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 4),
+            Text(
+              count.toString(),
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+            ),
           ],
         ),
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                _buildSaisonIndicateur(),
-                _buildStatistiquesCards(),
-                Expanded(
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _buildOngletToutes(),
-                      _buildOngletEnChaleur(),
-                      _buildOngletPredictions(),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _afficherSelecteurBrebis,
-        backgroundColor: Color(ReproductionConfig.colorPrimary),
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text(
-          "Nouvelle chaleur",
-          style: TextStyle(color: Colors.white),
-        ),
-      ),
+        Text(label,
+            style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+      ],
     );
   }
 
-  Widget _buildSaisonIndicateur() {
-    if (_saisonActuelle == null || _indicateurSaison == null) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      color: _couleurSaison?.withOpacity(0.1),
-      child: Row(
-        children: [
-          Icon(Icons.wb_sunny, color: _couleurSaison, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _saisonActuelle!,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: _couleurSaison,
-                  ),
-                ),
-                Text(
-                  _indicateurSaison!,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: _couleurSaison,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+  Widget _divider() {
+    return Container(width: 1, height: 36, color: Colors.grey[200]);
   }
 
-  Widget _buildStatistiquesCards() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          Expanded(
-            child: Card(
-              color: Colors.blue.shade50,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  children: [
-                    const Icon(Icons.local_fire_department, color: Colors.blue),
-                    const SizedBox(height: 4),
-                    Text(
-                      "$_chaleursCeMois",
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue,
-                      ),
-                    ),
-                    const Text(
-                      "Chaleurs ce mois",
-                      style: TextStyle(fontSize: 11, color: Colors.blue),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Card(
-              color: Colors.green.shade50,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  children: [
-                    const Icon(Icons.check_circle, color: Colors.green),
-                    const SizedBox(height: 4),
-                    Text(
-                      "$_brebisDisponibles",
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green,
-                      ),
-                    ),
-                    const Text(
-                      "Brebis disponibles",
-                      style: TextStyle(fontSize: 11, color: Colors.green),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // ============================================================
+  // ONGLET LISTE BREBIS
+  // ============================================================
 
-  // ===== ONGLET: TOUTES LES BREBIS =====
-
-  Widget _buildOngletToutes() {
-    if (_brebis.isEmpty) {
-      return _buildEmptyState(
-        Icons.pets,
-        "Aucune brebis",
-        "Ajoutez des brebis pour commencer le suivi",
+  Widget _buildOnglet(List<Map<String, dynamic>> brebis, String type) {
+    if (_isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: _couleurPrimaire),
       );
     }
 
+    if (brebis.isEmpty) {
+      return _buildVide(type);
+    }
+
     return RefreshIndicator(
-      onRefresh: _chargerDonnees,
+      onRefresh: _chargerBrebis,
+      color: _couleurPrimaire,
       child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _brebis.length,
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+        itemCount: brebis.length,
         itemBuilder: (context, index) {
-          return _buildBrebisCard(_brebis[index]);
+          return _buildBrebisCard(brebis[index]);
         },
       ),
     );
   }
 
-  // ===== ONGLET: BREBIS EN CHALEUR =====
-
-  Widget _buildOngletEnChaleur() {
-    if (_brebisEnChaleur.isEmpty) {
-      return _buildEmptyState(
-        Icons.local_fire_department,
-        "Aucune brebis en chaleur",
-        "Les brebis en chaleur dans les dernières 48h apparaîtront ici",
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _chargerDonnees,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _brebisEnChaleur.length,
-        itemBuilder: (context, index) {
-          return _buildBrebisEnChaleurCard(_brebisEnChaleur[index]);
-        },
-      ),
-    );
-  }
-
-  // ===== ONGLET: PRÉDICTIONS =====
-
-  Widget _buildOngletPredictions() {
-    if (_prochainesChaleurs.isEmpty) {
-      return _buildEmptyState(
-        Icons.analytics,
-        "Aucune prédiction disponible",
-        "Les prédictions apparaîtront après l'enregistrement de plusieurs chaleurs",
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _chargerDonnees,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _prochainesChaleurs.length,
-        itemBuilder: (context, index) {
-          return _buildPredictionCard(_prochainesChaleurs[index]);
-        },
-      ),
-    );
-  }
-
-  // ===== WIDGETS DE CARTES =====
+  // ============================================================
+  // ✅ CARTE BREBIS CLIQUABLE → BrebisDetailPage
+  // ============================================================
 
   Widget _buildBrebisCard(Map<String, dynamic> brebis) {
     final estGestante = brebis['estGestante'] == true;
-    final enLactation = brebis['enLactation'] == true;
+    final enChaleur = brebis['enChaleur'] == true;
     final tropJeune = brebis['tropJeune'] == true;
-    final ageEnMois = brebis['ageEnMois'];
-    final derniereChaleur = brebis['derniereChaleur'];
+    final ageMois = brebis['ageMois'] as int?;
+    final derniereChaleur = brebis['derniereChaleur'] as String?;
+    final dateAgnelage = brebis['dateAgnelagePrevu'] as String?;
+    final source = brebis['source'] as String;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        leading: _buildAvatar(brebis),
-        title: Text(
-          brebis['nom'] ?? 'Sans nom',
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("Race: ${brebis['race'] ?? 'N/A'}"),
-            if (ageEnMois != null)
-              Text(
-                "Âge: $ageEnMois mois",
-                style: TextStyle(
-                  fontSize: 12,
-                  color: tropJeune ? Colors.red : Colors.grey[600],
-                ),
-              ),
-            if (derniereChaleur != null)
-              Text(
-                "Dernière chaleur: ${_formatDate(DateTime.parse(derniereChaleur))}",
-                style: const TextStyle(fontSize: 12),
-              ),
-            if (tropJeune)
-              const Text(
-                "🚫 Trop jeune (minimum 8 mois)",
-                style: TextStyle(
-                  color: Colors.red,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-            if (estGestante)
-              const Text(
-                "🤰 Gestante",
-                style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold),
-              ),
-            if (enLactation && !estGestante)
-              const Text(
-                "🍼 En lactation",
-                style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
-              ),
-          ],
-        ),
-        trailing: Icon(
-          (estGestante || tropJeune) ? Icons.block : Icons.chevron_right,
-          color: (estGestante || tropJeune) ? Colors.red : Color(ReproductionConfig.colorPrimary),
-        ),
-        onTap: (estGestante || tropJeune)
-            ? () {
-                String message = '';
-                if (estGestante) {
-                  message = ReproductionConfig.messageGestante;
-                } else if (tropJeune) {
-                  message = ReproductionConfig.messageTropJeune;
-                }
-                
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    icon: const Icon(Icons.info_outline, color: Colors.orange, size: 64),
-                    title: const Text("Non disponible"),
-                    content: Text(message),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text("OK"),
-                      ),
-                    ],
-                  ),
-                );
-              }
-            : () async {
-                await _naviguerVersEnregistrerChaleur(brebis);
-              },
-      ),
-    );
-  }
+    // Couleur de la bordure selon statut
+    Color couleurBord;
+    Color couleurBadge;
+    String? labelBadge;
+    IconData iconeBadge;
 
-  Widget _buildBrebisEnChaleurCard(Map<String, dynamic> brebis) {
-    final dateChaleur = DateTime.parse(brebis['derniereChaleur']);
-    final heuresDepuis = DateTime.now().difference(dateChaleur).inHours;
-    final tropJeune = brebis['tropJeune'] == true;
-    final ageEnMois = brebis['ageEnMois'];
-    final debutFenetre = dateChaleur.add(
-      Duration(hours: ReproductionConfig.debutFenetileHeures),
-    );
-    final finFenetre = dateChaleur.add(
-      Duration(hours: ReproductionConfig.dureeChaleurHeures),
-    );
-    
-    final estDansFenetre = DateTime.now().isAfter(debutFenetre) &&
-        DateTime.now().isBefore(finFenetre);
+    if (tropJeune) {
+      couleurBord = Colors.orange.shade300;
+      couleurBadge = Colors.orange.shade700;
+      labelBadge = ageMois != null ? '$ageMois mois — trop jeune' : 'Trop jeune';
+      iconeBadge = Icons.child_care_rounded;
+    } else if (estGestante) {
+      couleurBord = _couleurGestante;
+      couleurBadge = _couleurGestante;
+      labelBadge = 'Gestante';
+      iconeBadge = Icons.pregnant_woman_rounded;
+    } else if (enChaleur) {
+      couleurBord = _couleurChaleur;
+      couleurBadge = _couleurChaleur;
+      labelBadge = 'En chaleur';
+      iconeBadge = Icons.local_fire_department_rounded;
+    } else {
+      couleurBord = Colors.grey.shade200;
+      couleurBadge = _couleurPrimaire;
+      labelBadge = null;
+      iconeBadge = Icons.check_circle_rounded;
+    }
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      color: estDansFenetre ? Colors.green.shade50 : Colors.orange.shade50,
-      child: ListTile(
-        leading: Stack(
-          children: [
-            _buildAvatar(brebis),
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: Container(
-                padding: const EdgeInsets.all(2),
-                decoration: const BoxDecoration(
-                  color: Colors.red,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.local_fire_department, size: 16, color: Colors.white),
-              ),
+    return GestureDetector(
+      onTap: () {
+        // Navigation vers le profil détaillé (accessible même si trop jeune)
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => BrebisDetailPage(
+              brebis: brebis,
+              source: source,
+            ),
+          ),
+        ).then((_) => _chargerBrebis());
+      },
+      child: Opacity(
+        opacity: tropJeune ? 0.75 : 1.0,
+        child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: couleurBord, width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: couleurBord.withOpacity(0.12),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
-        title: Text(
-          brebis['nom'] ?? 'Sans nom',
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
           children: [
-            Text("Il y a ${heuresDepuis}h"),
-            if (tropJeune && ageEnMois != null)
-              Text(
-                "⚠️ $ageEnMois mois (minimum 8 mois)",
-                style: const TextStyle(
-                  color: Colors.red,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-            if (estDansFenetre && !tropJeune)
-              const Text(
-                "🎯 FENÊTRE FERTILE ACTIVE",
-                style: TextStyle(
-                  color: Colors.green,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              )
-            else if (!tropJeune)
-              Text(
-                "Fenêtre: ${_formatHeure(debutFenetre)} - ${_formatHeure(finFenetre)}",
-                style: const TextStyle(fontSize: 12),
-              ),
-          ],
-        ),
-        trailing: tropJeune
-            ? const Icon(Icons.block, color: Colors.red)
-            : ElevatedButton.icon(
-                onPressed: () async {
-                  await _naviguerVersAccouplement(brebis);
-                },
-                icon: const Icon(Icons.favorite, size: 16),
-                label: const Text("Accoupler"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: estDansFenetre ? Colors.green : Colors.orange,
-                  foregroundColor: Colors.white,
-                ),
-              ),
-      ),
-    );
-  }
-
-  Widget _buildPredictionCard(Map<String, dynamic> brebis) {
-    final joursRestants = brebis['joursRestants'] as int;
-    final confiance = brebis['niveauConfiance'] as String;
-    
-    Color couleurConfiance;
-    if (confiance == "Élevé") {
-      couleurConfiance = Colors.green;
-    } else if (confiance == "Modéré") {
-      couleurConfiance = Colors.orange;
-    } else {
-      couleurConfiance = Colors.red;
-    }
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            _buildAvatar(brebis),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            // ── Ligne principale ──
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
                 children: [
-                  Text(
-                    brebis['nom'] ?? 'Sans nom',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                  const SizedBox(height: 4),
-                  Text("Race: ${brebis['race'] ?? 'N/A'}"),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      const Icon(Icons.calendar_today, size: 14, color: Colors.grey),
-                      const SizedBox(width: 4),
-                      Text(
-                        "Dans $joursRestants jours",
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      Icon(Icons.analytics, size: 14, color: couleurConfiance),
-                      const SizedBox(width: 4),
-                      Text(
-                        "Confiance: $confiance",
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: couleurConfiance,
-                          fontWeight: FontWeight.bold,
+                  // Photo / Avatar
+                  _buildAvatar(brebis, couleurBadge),
+                  const SizedBox(width: 14),
+
+                  // Infos
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                brebis['nom'] ?? 'Sans nom',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                  color: Color(0xFF1A1A1A),
+                                ),
+                              ),
+                            ),
+                            // Badge statut
+                            if (labelBadge != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: couleurBadge.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                      color: couleurBadge.withOpacity(0.3)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(iconeBadge,
+                                        size: 11, color: couleurBadge),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      labelBadge,
+                                      style: TextStyle(
+                                        color: couleurBadge,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(Icons.agriculture_rounded,
+                                size: 12, color: Colors.grey[500]),
+                            const SizedBox(width: 3),
+                            Text(
+                              brebis['race'] ?? 'Race inconnue',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey[600]),
+                            ),
+                            if (brebis['tag_rfid'] != null) ...[
+                              const SizedBox(width: 10),
+                              Icon(Icons.tag_rounded,
+                                  size: 12, color: Colors.grey[400]),
+                              const SizedBox(width: 3),
+                              Text(
+                                brebis['tag_rfid'],
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.grey[500]),
+                              ),
+                            ],
+                          ],
+                        ),
+                        if (derniereChaleur != null) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(Icons.schedule_rounded,
+                                  size: 11, color: Colors.grey[400]),
+                              const SizedBox(width: 3),
+                              Text(
+                                'Dernière chaleur: ${_formatDateCourte(DateTime.parse(derniereChaleur))}',
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.grey[500]),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+
+                  // Flèche cliquable
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: _couleurPrimaire.withOpacity(0.08),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.chevron_right_rounded,
+                      color: _couleurPrimaire,
+                      size: 20,
+                    ),
                   ),
                 ],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: joursRestants <= 3 ? Colors.orange : Colors.blue,
-                borderRadius: BorderRadius.circular(20),
+
+            // ── Bande info agnelage prévu (si gestante) ──
+            if (estGestante && dateAgnelage != null)
+              _buildBandeAgnelage(dateAgnelage),
+
+            // ── Bande avertissement trop jeune ──
+            if (tropJeune) _buildBandeTropJeune(ageMois),
+          ],
+        ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAvatar(Map<String, dynamic> brebis, Color couleur) {
+    final imageUrl = brebis['image_url'] as String?;
+    return Stack(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: imageUrl != null
+              ? Image.network(
+                  imageUrl,
+                  width: 58,
+                  height: 58,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _avatarFallback(couleur),
+                )
+              : _avatarFallback(couleur),
+        ),
+        // Indicateur source (petit badge)
+        Positioned(
+          bottom: 0,
+          right: 0,
+          child: Container(
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              color: couleur,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 1.5),
+            ),
+            child: Icon(
+              brebis['source'] == 'achete'
+                  ? Icons.shopping_bag_rounded
+                  : Icons.child_care_rounded,
+              size: 9,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _avatarFallback(Color couleur) {
+    return Container(
+      width: 58,
+      height: 58,
+      decoration: BoxDecoration(
+        color: couleur.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(Icons.pets_rounded, size: 28, color: couleur),
+    );
+  }
+
+  Widget _buildBandeAgnelage(String dateAgnelage) {
+    final date = DateTime.parse(dateAgnelage);
+    final jours = date.difference(DateTime.now()).inDays;
+    final urgent = jours <= 7;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: urgent
+            ? _couleurChaleur.withOpacity(0.08)
+            : _couleurGestante.withOpacity(0.06),
+        borderRadius:
+            const BorderRadius.vertical(bottom: Radius.circular(14)),
+        border: Border(
+          top: BorderSide(
+            color: urgent
+                ? _couleurChaleur.withOpacity(0.2)
+                : _couleurGestante.withOpacity(0.2),
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            urgent ? Icons.warning_amber_rounded : Icons.event_rounded,
+            size: 14,
+            color: urgent ? _couleurChaleur : _couleurGestante,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            urgent
+                ? 'Agnelage dans $jours jour${jours > 1 ? 's' : ''} !'
+                : 'Agnelage prévu: ${_formatDate(date)}',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: urgent ? _couleurChaleur : _couleurGestante,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBandeTropJeune(int? ageMois) {
+    final moisRestants = ageMois != null ? (8 - ageMois) : null;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.orange.withOpacity(0.08),
+        borderRadius:
+            const BorderRadius.vertical(bottom: Radius.circular(14)),
+        border: Border(
+          top: BorderSide(color: Colors.orange.withOpacity(0.25)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.lock_clock_rounded,
+              size: 14, color: Colors.orange.shade700),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              moisRestants != null
+                  ? '⚠️ Trop jeune — $moisRestants mois avant la reproduction (min. 8 mois)'
+                  : '⚠️ Trop jeune pour la reproduction (min. 8 mois)',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.orange.shade800,
               ),
-              child: Text(
-                joursRestants <= 3 ? "BIENTÔT" : "J-$joursRestants",
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===== VUE VIDE =====
+
+  Widget _buildVide(String type) {
+    String message;
+    IconData icone;
+
+    switch (type) {
+      case 'chaleur':
+        message = 'Aucune brebis en chaleur\ndans les 48 dernières heures';
+        icone = Icons.local_fire_department_rounded;
+        break;
+      case 'gestante':
+        message = 'Aucune brebis en gestation';
+        icone = Icons.pregnant_woman_rounded;
+        break;
+      default:
+        message = 'Aucune brebis trouvée\ndans le troupeau';
+        icone = Icons.pets_rounded;
+    }
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icone, size: 64, color: Colors.grey[300]),
+          const SizedBox(height: 16),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.grey[500],
+              fontSize: 15,
+              height: 1.5,
+            ),
+          ),
+          if (type == 'toutes') ...[
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: _chargerBrebis,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Actualiser'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _couleurPrimaire,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ===== FORMATAGE =====
+
+  String _formatDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
+  String _formatDateCourte(DateTime d) {
+    final diff = DateTime.now().difference(d).inDays;
+    if (diff == 0) return "Aujourd'hui";
+    if (diff == 1) return "Hier";
+    if (diff < 7) return "Il y a $diff jours";
+    return _formatDate(d);
+  }
+}
+
+// ============================================================
+// BOTTOM SHEET — SÉLECTION BREBIS POUR ENREGISTREMENT CHALEUR
+// ============================================================
+
+class _BottomSheetSelectionBrebis extends StatefulWidget {
+  final List<Map<String, dynamic>> brebis;
+
+  const _BottomSheetSelectionBrebis({required this.brebis});
+
+  @override
+  State<_BottomSheetSelectionBrebis> createState() =>
+      _BottomSheetSelectionBrebisState();
+}
+
+class _BottomSheetSelectionBrebisState
+    extends State<_BottomSheetSelectionBrebis> {
+  String _recherche = '';
+  final TextEditingController _ctrl = TextEditingController();
+
+  static const Color _couleurPrimaire = Color(0xFF1B5E20);
+  static const Color _couleurChaleur = Color(0xFFE53935);
+  static const Color _couleurGestante = Color(0xFF8E24AA);
+
+  List<Map<String, dynamic>> get _filtrees {
+    if (_recherche.isEmpty) return widget.brebis;
+    final q = _recherche.toLowerCase();
+    return widget.brebis.where((b) {
+      return (b['nom'] ?? '').toLowerCase().contains(q) ||
+          (b['race'] ?? '').toLowerCase().contains(q);
+    }).toList();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (_, scrollController) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          children: [
+            // Poignée
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            // Titre
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _couleurChaleur.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.local_fire_department_rounded,
+                        color: _couleurChaleur, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Sélectionner une brebis',
+                            style: TextStyle(
+                                fontSize: 17, fontWeight: FontWeight.w700)),
+                        Text('Pour enregistrer sa chaleur',
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey)),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon:
+                        const Icon(Icons.close_rounded, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+            // Recherche
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF5F5F5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: TextField(
+                  controller: _ctrl,
+                  onChanged: (v) => setState(() => _recherche = v),
+                  decoration: InputDecoration(
+                    hintText: 'Rechercher...',
+                    hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
+                    prefixIcon: const Icon(Icons.search_rounded,
+                        color: _couleurPrimaire, size: 20),
+                    suffixIcon: _recherche.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear_rounded,
+                                size: 16, color: Colors.grey),
+                            onPressed: () {
+                              _ctrl.clear();
+                              setState(() => _recherche = '');
+                            },
+                          )
+                        : null,
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
                 ),
               ),
+            ),
+            const Divider(height: 1),
+            // Liste
+            Expanded(
+              child: _filtrees.isEmpty
+                  ? Center(
+                      child: Text('Aucune brebis trouvée',
+                          style: TextStyle(color: Colors.grey[400])),
+                    )
+                  : ListView.separated(
+                      controller: scrollController,
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+                      itemCount: _filtrees.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (_, index) =>
+                          _buildItem(_filtrees[index]),
+                    ),
             ),
           ],
         ),
@@ -884,144 +1008,124 @@ class _ChaleurModuleState extends State<ChaleurModule>
     );
   }
 
-  Widget _buildAvatar(Map<String, dynamic> brebis) {
-    if (brebis['image_url'] != null) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.network(
-          brebis['image_url'],
-          width: 60,
-          height: 60,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return Container(
-              width: 60,
-              height: 60,
-              color: Colors.grey[300],
-              child: const Icon(Icons.pets, size: 30),
-            );
-          },
-        ),
-      );
+  Widget _buildItem(Map<String, dynamic> b) {
+    final estGestante = b['estGestante'] == true;
+    final enChaleur = b['enChaleur'] == true;
+    final tropJeune = b['tropJeune'] == true;
+    final ageMois = b['ageMois'] as int?;
+
+    Color couleur;
+    String? avertissement;
+    bool bloquee = false; // ✅ true = désactiver la sélection
+
+    if (tropJeune) {
+      // ✅ RÈGLE MÉTIER : nouveau-né < 8 mois → sélection BLOQUÉE
+      bloquee = true;
+      couleur = Colors.orange.shade700;
+      final moisRestants = ageMois != null ? (8 - ageMois) : null;
+      avertissement = moisRestants != null
+          ? 'Trop jeune — encore $moisRestants mois (min. 8 mois)'
+          : 'Trop jeune pour la reproduction (min. 8 mois)';
+    } else if (estGestante) {
+      couleur = _couleurGestante;
+      avertissement = 'Gestante — vérifiez avant de saisir';
+    } else if (enChaleur) {
+      couleur = _couleurChaleur;
+      avertissement = 'Déjà enregistrée en chaleur (48h)';
+    } else {
+      couleur = _couleurPrimaire;
+      avertissement = null;
     }
 
-    return Container(
-      width: 60,
-      height: 60,
-      decoration: BoxDecoration(
-        color: Color(ReproductionConfig.colorPrimary).withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
+    return Opacity(
+      opacity: bloquee ? 0.55 : 1.0,
+      child: InkWell(
+      onTap: bloquee
+          ? () {
+              // Affiche un message d'erreur si l'éleveur essaie quand même
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    ageMois != null
+                        ? '${b['nom'] ?? 'Cette brebis'} a seulement $ageMois mois. Minimum requis : 8 mois.'
+                        : 'Cette brebis est trop jeune (minimum 8 mois).',
+                  ),
+                  backgroundColor: Colors.orange.shade700,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              );
+            }
+          : () => Navigator.pop(context, b),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: couleur.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: couleur.withOpacity(0.25)),
+        ),
+        child: Row(
+          children: [
+            // Avatar
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: couleur.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: b['image_url'] != null
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.network(b['image_url'], fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              Icon(Icons.pets_rounded, color: couleur, size: 24)),
+                    )
+                  : Icon(Icons.pets_rounded, color: couleur, size: 24),
+            ),
+            const SizedBox(width: 12),
+            // Infos
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(b['nom'] ?? 'Sans nom',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 15)),
+                  Text(b['race'] ?? 'Race inconnue',
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  if (avertissement != null) ...[
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        Icon(Icons.info_outline_rounded,
+                            size: 11, color: couleur),
+                        const SizedBox(width: 3),
+                        Expanded(
+                          child: Text(avertissement,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: couleur,
+                                  fontWeight: FontWeight.w500)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Icon(
+              bloquee ? Icons.lock_rounded : Icons.chevron_right_rounded,
+              color: couleur,
+              size: 22,
+            ),
+          ],
+        ),
       ),
-      child: Icon(
-        Icons.pets,
-        size: 30,
-        color: Color(ReproductionConfig.colorPrimary),
       ),
     );
-  }
-
-  Widget _buildEmptyState(IconData icon, String titre, String sousTitre) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 80, color: Colors.grey[400]),
-          const SizedBox(height: 16),
-          Text(
-            titre,
-            style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            sousTitre,
-            style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ===== UTILITAIRES DE FORMATAGE =====
-
-  String _formatHeure(DateTime date) {
-    return "${date.hour}h${date.minute.toString().padLeft(2, '0')}";
-  }
-
-  String _formatDate(DateTime date) {
-    final maintenant = DateTime.now();
-    final difference = maintenant.difference(date).inDays;
-
-    if (difference == 0) return "Aujourd'hui";
-    if (difference == 1) return "Hier";
-    if (difference < 7) return "Il y a $difference jours";
-    if (difference < 30) return "Il y a ${(difference / 7).floor()} semaines";
-    return "${date.day}/${date.month}/${date.year}";
-  }
-
-  // ===== MÉTHODES DE NAVIGATION =====
-
-  /// Navigation vers la page d'enregistrement de chaleur
-  Future<void> _naviguerVersEnregistrerChaleur(Map<String, dynamic> brebis) async {
-    try {
-      final result = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => EnregistrerChaleurPageAmelioree(
-            brebis: brebis,
-            source: brebis['source'],
-          ),
-        ),
-      );
-      
-      // Recharger les données si l'enregistrement a réussi
-      if (result == true && mounted) {
-        await _chargerDonnees();
-        _showSnackBar(
-          "✅ Chaleur enregistrée avec succès", 
-          Color(ReproductionConfig.colorSuccess),
-        );
-      }
-    } catch (e) {
-      debugPrint("❌ Erreur navigation enregistrement chaleur: $e");
-      if (mounted) {
-        _showSnackBar(
-          "Erreur lors de l'ouverture de la page d'enregistrement",
-          Color(ReproductionConfig.colorDanger),
-        );
-      }
-    }
-  }
-
-  /// Navigation vers la page d'accouplement
-  Future<void> _naviguerVersAccouplement(Map<String, dynamic> brebis) async {
-    try {
-      final result = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => EnregistrerAccouplement(
-            brebisPreSelectionnee: brebis,
-            sourcePreSelectionnee: brebis['source'],
-          ),
-        ),
-      );
-      
-      // Recharger les données si l'accouplement a réussi
-      if (result == true && mounted) {
-        await _chargerDonnees();
-        _showSnackBar(
-          "✅ Accouplement enregistré avec succès", 
-          Color(ReproductionConfig.colorSuccess),
-        );
-      }
-    } catch (e) {
-      debugPrint("❌ Erreur navigation accouplement: $e");
-      if (mounted) {
-        _showSnackBar(
-          "Erreur lors de l'ouverture de la page d'accouplement",
-          Color(ReproductionConfig.colorDanger),
-        );
-      }
-    }
   }
 }

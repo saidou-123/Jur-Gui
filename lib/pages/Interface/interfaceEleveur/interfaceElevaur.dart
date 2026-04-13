@@ -3,15 +3,14 @@
 // Fichier: lib/pages/Interface/interfaceEleveur.dart
 // ============================================================
 
-import 'package:depart/Eleveures/AccouplemaentAncien/EnregistrerAccouplement.dart';
-import 'package:depart/Eleveures/Ajouter%20Animal/NouveauNeeBluetooth.dart';
 import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDBluetooth.dart';
+import 'package:depart/Eleveures/Mon%20Troupeau/SupprimerAnimal/AnimalDeletePage.dart';
 import 'package:depart/Eleveures/New/Accouplemt/Accouplement.dart';
+import 'package:depart/Eleveures/New/Dashboard/DashboardReproduction.dart';
 import 'package:depart/Eleveures/New/Notification/NotificationsViewPage.dart';
 import 'package:depart/Eleveures/New/chaleur/ChaleurModule.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:depart/Eleveures/ChaleurAncien/Chaleur.dart';
 import 'package:depart/Eleveures/Mon%20Troupeau/Mon_Troupeau.dart';
 import 'package:depart/widgets/optioncardEleveur.dart';
 import 'package:depart/securite/ErrorHandler.dart';
@@ -662,7 +661,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               child: optioncardEleveur(
                 image: 'assets/image/img14.png',
                 label: 'Ajouter Animal',
-                route: const NouveauNeeBluetooth(),
+                route: const  AnimalDeletePage (),
                 backgroundColor: const Color(0xFFFFF9C4),
               ),
             ),
@@ -758,3 +757,6 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     );
   }
 }
+
+
+

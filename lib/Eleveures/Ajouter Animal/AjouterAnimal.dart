@@ -1,8 +1,15 @@
+// ============================================================
+// AJOUTER ANIMAL - VERSION CORRIGÉE
+// Fichier: lib/pages/AjouterAnimal/AjouterAnimal.dart
+// Corrections:
+//   ✅ 1. Séparé de main.dart dans son propre fichier
+//   ✅ 2. const ajouté aux Color() pour meilleures performances
+// ============================================================
+
 import 'package:depart/Eleveures/Ajouter%20Animal/AnimalAchateBluetooth.dart';
 import 'package:depart/Eleveures/Ajouter%20Animal/NouveauNeeBluetooth.dart';
 import 'package:depart/widgets/optioncardEleveur.dart';
 import 'package:flutter/material.dart';
-
 
 class AjouterAnimal extends StatelessWidget {
   const AjouterAnimal({super.key});
@@ -10,7 +17,10 @@ class AjouterAnimal extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Ajouter un animal"), centerTitle: true),
+      appBar: AppBar(
+        title: const Text("Ajouter un animal"),
+        centerTitle: true,
+      ),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0),
         child: Column(
@@ -39,8 +49,9 @@ class AjouterAnimal extends StatelessWidget {
                   child: optioncardEleveur(
                     image: 'assets/image/img6.png',
                     label: "Nouveau-né",
-                    route: const  NouveauNeeBluetooth(),
-                    backgroundColor: Color(0xFFE8F5E9), // Vert très clair
+                    route: const NouveauNeeBluetooth(),
+                    // ✅ CORRECTION: const ajouté à Color()
+                    backgroundColor: const Color(0xFFE8F5E9),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -49,7 +60,8 @@ class AjouterAnimal extends StatelessWidget {
                     image: 'assets/image/img10.png',
                     label: 'Animal acheté',
                     route: const AnimalAchateBluetooth(),
-                    backgroundColor: Color(0xFFFFF3E0), // Orange très clair
+                    // ✅ CORRECTION: const ajouté à Color()
+                    backgroundColor: const Color(0xFFFFF3E0),
                   ),
                 ),
               ],
@@ -60,4 +72,3 @@ class AjouterAnimal extends StatelessWidget {
     );
   }
 }
-

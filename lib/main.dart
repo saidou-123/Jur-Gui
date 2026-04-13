@@ -53,7 +53,7 @@ class MyApp extends StatelessWidget {
       routes: {
         // Navigation depuis notification de chaleur
         '/chaleur': (context) => const ChaleurModule(),
-        
+         
         // Navigation depuis notification d'agnelage
         '/accouplements': (context) {
           // Récupérer les arguments passés par la notification
@@ -66,7 +66,6 @@ class MyApp extends StatelessWidget {
             // TODO OPTIONNEL: Charger les données de la brebis et les passer en argument
             // Pour l'instant, ouvre la page sans pré-sélection
           }
-          
           return const EnregistrerAccouplement();
         },
       },
