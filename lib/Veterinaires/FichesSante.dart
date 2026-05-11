@@ -1,3 +1,4 @@
+import 'package:depart/Veterinaires/Scanveterinaire/FicheSanteDetailAnimal.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -191,7 +192,7 @@ class _FichesSanteState extends State<FichesSante> {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => FicheSanteDetailPage(
+                builder: (context) =>FicheSanteDetailAnimal(
                   animal: animal,
                   source: animal['source'],
                 ),

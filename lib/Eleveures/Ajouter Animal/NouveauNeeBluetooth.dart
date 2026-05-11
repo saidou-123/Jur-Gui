@@ -8,6 +8,7 @@ import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:depart/securite/ErrorHandler.dart';
 import 'package:depart/securite/Validators.dart';
@@ -78,238 +79,321 @@ class _NouveauNeeBluetoothState extends State<NouveauNeeBluetooth> {
   // =====================================================
   // BLUETOOTH BLE - INITIALISATION
   // =====================================================
-  Future<void> _initializeBluetooth() async {
-    if (!mounted) return;
+  //
+Future<void> _initializeBluetooth() async {
+  if (!mounted) return;
 
-    try {
-      debugPrint("📱 Initialisation Bluetooth...");
+  try {
+    debugPrint("📱 Initialisation Bluetooth...");
 
-      // Vérifier si le Bluetooth est supporté
-      if (await FlutterBluePlus.isSupported == false) {
-        if (mounted) {
-          _showSnackBar("❌ Bluetooth non supporté sur cet appareil", Colors.red);
-        }
-        return;
-      }
+    // ✅ ÉTAPE 1 : Demander toutes les permissions nécessaires
+    final permissions = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.location,          // ← crucial sur Android < 12
+    ].request();
 
-      // Vérifier l'état du Bluetooth
-      final state = await FlutterBluePlus.adapterState.first;
-      if (state != BluetoothAdapterState.on) {
-        if (mounted) {
-          _showSnackBar("⚠️ Activez le Bluetooth", Colors.orange);
-        }
-        return;
-      }
+    permissions.forEach((perm, status) {
+      debugPrint("🔑 $perm → $status");
+    });
 
-      // Démarrer le scan automatiquement
-      _startBLEScan();
-      
-    } catch (e, stackTrace) {
-      ErrorHandler.log(e, stackTrace, context: 'Init Bluetooth');
+    // ✅ ÉTAPE 2 : Vérifier que tout est accordé
+    final denied = permissions.entries
+        .where((e) => !e.value.isGranted)
+        .map((e) => e.key.toString())
+        .toList();
+
+    if (denied.isNotEmpty) {
+      debugPrint("❌ Permissions refusées: $denied");
       if (mounted) {
-        ErrorHandler.show(context, e, customMessage: 'Erreur Bluetooth');
+        _showSnackBar("❌ Permissions BLE refusées: $denied", Colors.red);
       }
+      return;
     }
-  }
 
-  // =====================================================
-  // BLUETOOTH BLE - SCAN DES APPAREILS
-  // =====================================================
-  Future<void> _startBLEScan() async {
-    if (_isScanning || _isConnected) return;
+    debugPrint("✅ Toutes les permissions accordées");
 
-    setState(() => _isScanning = true);
-    debugPrint("🔍 Scan BLE démarré...");
-    
-    _showSnackBar("🔍 Recherche du lecteur RFID...", Colors.blue);
-
-    try {
-      // Arrêter tout scan en cours
-      await FlutterBluePlus.stopScan();
-      
-      // Démarrer un nouveau scan
-      await FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 15),
-        androidUsesFineLocation: true,
-      );
-
-      // Écouter les résultats du scan
-      _scanSubscription = FlutterBluePlus.scanResults.listen(
-        (results) {
-          for (ScanResult result in results) {
-            final deviceName = result.device.platformName;
-            
-            debugPrint("📡 Appareil trouvé: $deviceName (${result.device.remoteId})");
-            
-            // Chercher notre ESP32 (adapter le nom selon ton code ESP32)
-            if (deviceName.contains("ESP32") || 
-                deviceName.contains("RFID") ||
-                deviceName.contains("BLE_RFID") ||
-                deviceName.contains("Jur-Gui")) {  // ✅ Ajout du nom de ton ESP32
-              
-              debugPrint("✅ ESP32 RFID détecté!");
-              _connectToDevice(result.device);
-              break;
-            }
-          }
-        },
-        onError: (error) {
-          debugPrint("❌ Erreur scan: $error");
-          if (mounted) {
-            setState(() => _isScanning = false);
-          }
-        },
-      );
-
-      // Timeout après 15 secondes
-      Future.delayed(const Duration(seconds: 15), () {
-        if (_isScanning && !_isConnected && mounted) {
-          _stopBLEScan();
-          _showSnackBar("⚠️ Aucun lecteur RFID trouvé", Colors.orange);
-        }
-      });
-      
-    } catch (e) {
-      debugPrint("❌ Erreur démarrage scan: $e");
-      if (mounted) {
-        setState(() => _isScanning = false);
-        _showSnackBar("❌ Erreur lors du scan", Colors.red);
-      }
+    // ✅ ÉTAPE 3 : Vérifier Bluetooth
+    if (await FlutterBluePlus.isSupported == false) {
+      if (mounted) _showSnackBar("❌ Bluetooth non supporté", Colors.red);
+      return;
     }
-  }
 
-  Future<void> _stopBLEScan() async {
-    await _scanSubscription?.cancel();
-    _scanSubscription = null;
+    final state = await FlutterBluePlus.adapterState.first;
+    debugPrint("📡 État Bluetooth: $state");
+
+    if (state != BluetoothAdapterState.on) {
+      if (mounted) _showSnackBar("⚠️ Activez le Bluetooth", Colors.orange);
+      return;
+    }
+
+    _startBLEScan();
+
+  } catch (e, stackTrace) {
+    ErrorHandler.log(e, stackTrace, context: 'Init Bluetooth');
+    if (mounted) ErrorHandler.show(context, e, customMessage: 'Erreur Bluetooth');
+  }
+}
+  // =====================================================
+// BLUETOOTH BLE - SCAN CORRIGÉ
+// =====================================================
+//
+Future<void> _startBLEScan() async {
+  if (_isScanning || _isConnected) return;
+
+  setState(() => _isScanning = true);
+  debugPrint("🔍 Scan BLE démarré...");
+  _showSnackBar("🔍 Recherche du lecteur RFID...", Colors.blue);
+
+  try {
     await FlutterBluePlus.stopScan();
-    
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // ✅ Vérifier d'abord les appareils déjà connus (bonded)
+    final bonded = await FlutterBluePlus.bondedDevices;
+    debugPrint("📋 Appareils bondés: ${bonded.length}");
+    for (final d in bonded) {
+      debugPrint("   🔗 Bondé: '${d.platformName}' | ${d.remoteId}");
+      if (d.platformName.contains("Jur-Gui") ||
+          d.platformName.contains("JUR-GUI") ||
+          d.platformName.contains("ESP32") ||
+          d.platformName.contains("RFID")) {
+        debugPrint("✅ ESP32 trouvé dans les bondés!");
+        setState(() => _isScanning = false);
+        _connectToDevice(d);
+        return;
+      }
+    }
+
+    // ✅ Sinon scanner
+    _scanSubscription = FlutterBluePlus.onScanResults.listen((results) {
+      if (results.isEmpty) return;
+      for (ScanResult r in results) {
+        final name = r.device.platformName;
+        debugPrint("📡 '$name' | ${r.device.remoteId} | RSSI:${r.rssi}");
+
+        if (name.contains("Jur-Gui") ||
+            name.contains("JUR-GUI") ||
+            name.contains("ESP32")   ||
+            name.contains("RFID")) {
+          debugPrint("✅ ESP32 détecté via scan!");
+          _stopBLEScan().then((_) => _connectToDevice(r.device));
+          return;
+        }
+      }
+    });
+
+ await FlutterBluePlus.startScan(
+  timeout: const Duration(seconds: 30),
+  androidUsesFineLocation: false,
+);
+
+debugPrint("✅ Scan actif, en attente d'appareils...");
+
+// ✅ NOUVEAU : surveiller quand le scan s'arrête et pourquoi
+FlutterBluePlus.isScanning.listen((isScanning) {
+  debugPrint("🔄 isScanning changé → $isScanning");
+});
+
+    Future.delayed(const Duration(seconds: 30), () {
+      if (_isScanning && !_isConnected && mounted) {
+        _stopBLEScan();
+        _showSnackBar("⚠️ ESP32 non trouvé — réessayez", Colors.orange);
+      }
+    });
+
+  } catch (e) {
+    debugPrint("❌ Erreur scan: $e");
     if (mounted) {
       setState(() => _isScanning = false);
+      _showSnackBar("❌ Erreur lors du scan", Colors.red);
     }
-    
-    debugPrint("🛑 Scan BLE arrêté");
   }
+}
+
 
   // =====================================================
   // BLUETOOTH BLE - CONNEXION À L'ESP32
   // =====================================================
+  //
   Future<void> _connectToDevice(BluetoothDevice device) async {
-    try {
-      await _stopBLEScan();
+  try {
+    await _stopBLEScan();
+
+    debugPrint("🔗 Connexion à ${device.platformName}...");
+    _showSnackBar("🔗 Connexion au lecteur...", Colors.blue);
+
+    await device.connect(
+      timeout: const Duration(seconds: 15),
+      autoConnect: false,
+    );
+
+    setState(() {
+      _connectedDevice = device;
+      _isConnected = true;
+    });
+
+    debugPrint("✅ Connecté à ${device.platformName}");
+    _showSnackBar("✅ Lecteur RFID connecté", Colors.green);
+
+    // ✅ CORRECTIF : ignorer le premier état "disconnected" au démarrage
+    bool firstEvent = true;
+    _deviceStateSubscription = device.connectionState.listen((state) {
+      debugPrint("📶 État connexion: $state");
       
-      debugPrint("🔗 Connexion à ${device.platformName}...");
-      _showSnackBar("🔗 Connexion au lecteur...", Colors.blue);
-
-      // Se connecter à l'appareil
-      await device.connect(
-        timeout: const Duration(seconds: 15),
-        autoConnect: false,
-      );
-
-      setState(() {
-        _connectedDevice = device;
-        _isConnected = true;
-      });
-
-      debugPrint("✅ Connecté à ${device.platformName}");
-      _showSnackBar("✅ Lecteur RFID connecté", Colors.green);
-
-      // Écouter les déconnexions
-      _deviceStateSubscription = device.connectionState.listen((state) {
-        if (state == BluetoothConnectionState.disconnected && mounted) {
-          debugPrint("🔴 Appareil déconnecté");
-          _handleDisconnection();
-        }
-      });
-
-      // Découvrir les services
-      await _discoverServices(device);
-      
-    } catch (e) {
-      debugPrint("❌ Erreur connexion: $e");
-      if (mounted) {
-        _showSnackBar("❌ Échec de connexion", Colors.red);
-        setState(() {
-          _connectedDevice = null;
-          _isConnected = false;
-        });
+      if (firstEvent) {
+        firstEvent = false;
+        return; // ← ignorer le premier événement
       }
+      
+      if (state == BluetoothConnectionState.disconnected && mounted) {
+        debugPrint("🔴 Appareil déconnecté");
+        _handleDisconnection();
+      }
+    });
+
+    await _discoverServices(device);
+
+  } catch (e) {
+    debugPrint("❌ Erreur connexion: $e");
+    if (mounted) {
+      _showSnackBar("❌ Échec de connexion", Colors.red);
+      setState(() {
+        _connectedDevice = null;
+        _isConnected = false;
+      });
+      // ✅ Relancer le scan après échec
+      Future.delayed(const Duration(seconds: 2), _startBLEScan);
     }
   }
+}
 
   // =====================================================
   // BLUETOOTH BLE - DÉCOUVERTE DES SERVICES
   // =====================================================
+  //
   Future<void> _discoverServices(BluetoothDevice device) async {
-    try {
-      debugPrint("🔍 Découverte des services...");
-      
-      List<BluetoothService> services = await device.discoverServices();
-      
-      for (BluetoothService service in services) {
-        debugPrint("📋 Service: ${service.uuid}");
-        
-        // Chercher notre service RFID
-        if (service.uuid.toString().toLowerCase() == SERVICE_UUID.toLowerCase()) {
-          debugPrint("✅ Service RFID trouvé!");
-          
-          for (BluetoothCharacteristic characteristic in service.characteristics) {
-            debugPrint("   📝 Caractéristique: ${characteristic.uuid}");
-            
-            // Chercher notre caractéristique RFID
-            if (characteristic.uuid.toString().toLowerCase() == CHARACTERISTIC_UUID.toLowerCase()) {
-              debugPrint("✅ Caractéristique RFID trouvée!");
-              
-              _rfidCharacteristic = characteristic;
-              await _subscribeToRFID(characteristic);
-              return;
-            }
-          }
-        }
-      }
-      
-      // Service non trouvé
-      debugPrint("⚠️ Service RFID non trouvé");
-      _showSnackBar("⚠️ Service RFID non disponible", Colors.orange);
-      
-    } catch (e) {
-      debugPrint("❌ Erreur découverte services: $e");
-      if (mounted) {
-        _showSnackBar("❌ Erreur de communication", Colors.red);
+  try {
+    debugPrint("🔍 Découverte des services...");
+
+    // ✅ Délai stabilisation connexion
+    await Future.delayed(const Duration(milliseconds: 800));
+
+    List<BluetoothService> services = await device.discoverServices();
+    debugPrint("📋 Nombre de services trouvés: ${services.length}");
+
+    for (BluetoothService service in services) {
+      debugPrint("📋 Service UUID: ${service.uuid.toString().toLowerCase()}");
+      debugPrint("📋 On cherche:   $SERVICE_UUID");
+      debugPrint("📋 Match: ${service.uuid.toString().toLowerCase() == SERVICE_UUID.toLowerCase()}");
+
+      for (BluetoothCharacteristic c in service.characteristics) {
+        debugPrint("   └─ Caractéristique: ${c.uuid} | notify:${c.properties.notify} | read:${c.properties.read}");
       }
     }
+
+    // ✅ Chercher sans comparaison stricte (contient)
+    BluetoothService? targetService;
+    for (BluetoothService service in services) {
+      if (service.uuid.toString().toLowerCase().contains(
+          SERVICE_UUID.substring(0, 8).toLowerCase())) {
+        targetService = service;
+        debugPrint("✅ Service trouvé via contains!");
+        break;
+      }
+    }
+
+    if (targetService == null) {
+      debugPrint("❌ Service introuvable — UUIDs disponibles:");
+      for (var s in services) {
+        debugPrint("   → ${s.uuid}");
+      }
+      _showSnackBar("❌ Service RFID non trouvé", Colors.red);
+      return;
+    }
+
+    BluetoothCharacteristic? targetChar;
+    for (BluetoothCharacteristic c in targetService.characteristics) {
+      debugPrint("   Char: ${c.uuid.toString().toLowerCase()}");
+      debugPrint("   Cherche: $CHARACTERISTIC_UUID");
+      if (c.uuid.toString().toLowerCase().contains(
+          CHARACTERISTIC_UUID.substring(0, 8).toLowerCase())) {
+        targetChar = c;
+        debugPrint("✅ Caractéristique trouvée via contains!");
+        break;
+      }
+    }
+
+    if (targetChar == null) {
+      debugPrint("❌ Caractéristique introuvable");
+      _showSnackBar("❌ Caractéristique RFID non trouvée", Colors.red);
+      return;
+    }
+
+    _rfidCharacteristic = targetChar;
+    await _subscribeToRFID(targetChar);
+
+  } catch (e, stack) {
+    debugPrint("❌ Erreur discoverServices: $e");
+    debugPrint("$stack");
+    if (mounted) {
+      _showSnackBar("❌ Erreur de communication", Colors.red);
+    }
   }
+}
+
+
+Future<void> _stopBLEScan() async {
+  await _scanSubscription?.cancel();
+  _scanSubscription = null;
+  await FlutterBluePlus.stopScan();
+  if (mounted) setState(() => _isScanning = false);
+  debugPrint("🛑 Scan BLE arrêté");
+}
 
   // =====================================================
   // BLUETOOTH BLE - ÉCOUTE DES NOTIFICATIONS RFID
   // =====================================================
-  Future<void> _subscribeToRFID(BluetoothCharacteristic characteristic) async {
-    try {
-      // Activer les notifications
-      await characteristic.setNotifyValue(true);
-      
-      debugPrint("✅ Notifications RFID activées");
-      _showSnackBar("✅ Système RFID prêt", Colors.green);
+Future<void> _subscribeToRFID(BluetoothCharacteristic characteristic) async {
+  try {
+    // ✅ CORRECTIF 1 : Attendre que la connexion soit stable
+    await Future.delayed(const Duration(milliseconds: 500));
 
-      // Écouter les données
-      _characteristicSubscription = characteristic.lastValueStream.listen(
-        (value) {
-          if (value.isNotEmpty) {
-            _onRFIDDataReceived(value);
-          }
-        },
-        onError: (error) {
-          debugPrint("❌ Erreur notification: $error");
-        },
-      );
-      
-    } catch (e) {
-      debugPrint("❌ Erreur souscription: $e");
-      if (mounted) {
-        _showSnackBar("❌ Échec d'activation RFID", Colors.red);
+    // ✅ CORRECTIF 2 : Lire une première valeur pour "réveiller" la caractéristique
+    try {
+      final initial = await characteristic.read();
+      if (initial.isNotEmpty) {
+        debugPrint("📖 Valeur initiale: ${utf8.decode(initial)}");
       }
+    } catch (_) {}
+
+    // ✅ CORRECTIF 3 : Activer les notifications APRÈS le délai
+    await characteristic.setNotifyValue(true);
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    debugPrint("✅ Notifications RFID activées");
+    _showSnackBar("✅ Système RFID prêt", Colors.green);
+
+    // ✅ CORRECTIF 4 : Écouter onValueReceived au lieu de lastValueStream
+    _characteristicSubscription = characteristic.onValueReceived.listen(
+      (value) {
+        debugPrint("📥 Données BLE brutes: $value");
+        if (value.isNotEmpty) {
+          _onRFIDDataReceived(value);
+        }
+      },
+      onError: (error) {
+        debugPrint("❌ Erreur notification: $error");
+      },
+    );
+
+  } catch (e) {
+    debugPrint("❌ Erreur souscription: $e");
+    if (mounted) {
+      _showSnackBar("❌ Échec d'activation RFID", Colors.red);
     }
   }
+}
 
   // =====================================================
   // TRAITEMENT DES DONNÉES RFID REÇUES

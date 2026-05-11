@@ -8,6 +8,7 @@ import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:depart/securite/ErrorHandler.dart';
 import 'package:depart/securite/Validators.dart';
@@ -40,15 +41,15 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _rfidCharacteristic;
   StreamSubscription? _scanSubscription;
-  StreamSubscription? _deviceStateSubscription;  
+  StreamSubscription? _deviceStateSubscription;
   StreamSubscription? _characteristicSubscription;
   bool _isScanning = false;
   bool _isConnected = false;
-  
-  // UUID personnalisés (MÊME UUID que NouveauNeeBluetooth)
+
+  // UUID identiques à NouveauNeeBluetooth
   static const String SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
   static const String CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-  
+
   // Anti-doublon
   String? _lastReceivedUID;
   DateTime? _lastScanTime;
@@ -78,7 +79,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   }
 
   // =====================================================
-  // BLUETOOTH BLE - INITIALISATION
+  // BLUETOOTH BLE - INITIALISATION AVEC PERMISSIONS
   // =====================================================
   Future<void> _initializeBluetooth() async {
     if (!mounted) return;
@@ -86,93 +87,120 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
     try {
       debugPrint("📱 Initialisation Bluetooth...");
 
-      // Vérifier si le Bluetooth est supporté
+      // ✅ Demander les permissions au runtime
+      final permissions = await [
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+        Permission.location,
+      ].request();
+
+      permissions.forEach((perm, status) {
+        debugPrint("🔑 $perm → $status");
+      });
+
+      final denied = permissions.entries
+          .where((e) => !e.value.isGranted)
+          .map((e) => e.key.toString())
+          .toList();
+
+      if (denied.isNotEmpty) {
+        debugPrint("❌ Permissions refusées: $denied");
+        if (mounted) {
+          _showSnackBar("❌ Permissions BLE refusées", Colors.red);
+        }
+        return;
+      }
+
+      debugPrint("✅ Toutes les permissions accordées");
+
       if (await FlutterBluePlus.isSupported == false) {
-        if (mounted) {
-          _showSnackBar("❌ Bluetooth non supporté sur cet appareil", Colors.red);
-        }
+        if (mounted) _showSnackBar("❌ Bluetooth non supporté", Colors.red);
         return;
       }
 
-      // Vérifier l'état du Bluetooth
       final state = await FlutterBluePlus.adapterState.first;
+      debugPrint("📡 État Bluetooth: $state");
+
       if (state != BluetoothAdapterState.on) {
-        if (mounted) {
-          _showSnackBar("⚠️ Activez le Bluetooth", Colors.orange);
-        }
+        if (mounted) _showSnackBar("⚠️ Activez le Bluetooth", Colors.orange);
         return;
       }
 
-      // Démarrer le scan automatiquement
       _startBLEScan();
-      
+
     } catch (e, stackTrace) {
       ErrorHandler.log(e, stackTrace, context: 'Init Bluetooth');
-      if (mounted) {
-        ErrorHandler.show(context, e, customMessage: 'Erreur Bluetooth');
-      }
+      if (mounted) ErrorHandler.show(context, e, customMessage: 'Erreur Bluetooth');
     }
   }
 
   // =====================================================
-  // BLUETOOTH BLE - SCAN DES APPAREILS
+  // BLUETOOTH BLE - SCAN CORRIGÉ
   // =====================================================
   Future<void> _startBLEScan() async {
     if (_isScanning || _isConnected) return;
 
     setState(() => _isScanning = true);
     debugPrint("🔍 Scan BLE démarré...");
-    
     _showSnackBar("🔍 Recherche du lecteur RFID...", Colors.blue);
 
     try {
-      // Arrêter tout scan en cours
       await FlutterBluePlus.stopScan();
-      
-      // Démarrer un nouveau scan
-      await FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 15),
-        androidUsesFineLocation: true,
-      );
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      // Écouter les résultats du scan
-      _scanSubscription = FlutterBluePlus.scanResults.listen(
-        (results) {
-          for (ScanResult result in results) {
-            final deviceName = result.device.platformName;
-            
-            debugPrint("📡 Appareil trouvé: $deviceName (${result.device.remoteId})");
-            
-            // Chercher notre ESP32
-            if (deviceName.contains("ESP32") || 
-                deviceName.contains("RFID") ||
-                deviceName.contains("BLE_RFID") ||
-                deviceName.contains("Jur-Gui")) {
-              
-              debugPrint("✅ ESP32 RFID détecté!");
-              _connectToDevice(result.device);
-              break;
-            }
-          }
-        },
-        onError: (error) {
-          debugPrint("❌ Erreur scan: $error");
-          if (mounted) {
-            setState(() => _isScanning = false);
-          }
-        },
-      );
+      // ✅ Vérifier d'abord les appareils bondés
+      final bonded = await FlutterBluePlus.bondedDevices;
+      debugPrint("📋 Appareils bondés: ${bonded.length}");
+      for (final d in bonded) {
+        debugPrint("   🔗 Bondé: '${d.platformName}' | ${d.remoteId}");
+        if (d.platformName.contains("Jur-Gui") ||
+            d.platformName.contains("JUR-GUI") ||
+            d.platformName.contains("ESP32") ||
+            d.platformName.contains("RFID")) {
+          debugPrint("✅ ESP32 trouvé dans les bondés!");
+          setState(() => _isScanning = false);
+          _connectToDevice(d);
+          return;
+        }
+      }
 
-      // Timeout après 15 secondes
-      Future.delayed(const Duration(seconds: 15), () {
-        if (_isScanning && !_isConnected && mounted) {
-          _stopBLEScan();
-          _showSnackBar("⚠️ Aucun lecteur RFID trouvé", Colors.orange);
+      // ✅ Écouter AVANT de démarrer le scan
+      _scanSubscription = FlutterBluePlus.onScanResults.listen((results) {
+        if (results.isEmpty) return;
+        for (ScanResult r in results) {
+          final name = r.device.platformName;
+          debugPrint("📡 '$name' | ${r.device.remoteId} | RSSI:${r.rssi}");
+
+          if (name.contains("Jur-Gui") ||
+              name.contains("JUR-GUI") ||
+              name.contains("ESP32") ||
+              name.contains("RFID") ||
+              name.contains("BLE_RFID")) {
+            debugPrint("✅ ESP32 détecté via scan!");
+            _stopBLEScan().then((_) => _connectToDevice(r.device));
+            return;
+          }
         }
       });
-      
+
+      // ✅ Démarrer APRÈS l'écoute
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: 30),
+        androidUsesFineLocation: false,
+        withServices: [],
+      );
+
+      debugPrint("✅ Scan actif, en attente d'appareils...");
+
+      Future.delayed(const Duration(seconds: 30), () {
+        if (_isScanning && !_isConnected && mounted) {
+          _stopBLEScan();
+          _showSnackBar("⚠️ ESP32 non trouvé — réessayez", Colors.orange);
+        }
+      });
+
     } catch (e) {
-      debugPrint("❌ Erreur démarrage scan: $e");
+      debugPrint("❌ Erreur scan: $e");
       if (mounted) {
         setState(() => _isScanning = false);
         _showSnackBar("❌ Erreur lors du scan", Colors.red);
@@ -184,11 +212,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
     await _scanSubscription?.cancel();
     _scanSubscription = null;
     await FlutterBluePlus.stopScan();
-    
-    if (mounted) {
-      setState(() => _isScanning = false);
-    }
-    
+    if (mounted) setState(() => _isScanning = false);
     debugPrint("🛑 Scan BLE arrêté");
   }
 
@@ -198,11 +222,10 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   Future<void> _connectToDevice(BluetoothDevice device) async {
     try {
       await _stopBLEScan();
-      
+
       debugPrint("🔗 Connexion à ${device.platformName}...");
       _showSnackBar("🔗 Connexion au lecteur...", Colors.blue);
 
-      // Se connecter à l'appareil
       await device.connect(
         timeout: const Duration(seconds: 15),
         autoConnect: false,
@@ -216,17 +239,24 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
       debugPrint("✅ Connecté à ${device.platformName}");
       _showSnackBar("✅ Lecteur RFID connecté", Colors.green);
 
-      // Écouter les déconnexions
+      // ✅ Ignorer le premier événement "disconnected" au démarrage
+      bool firstEvent = true;
       _deviceStateSubscription = device.connectionState.listen((state) {
+        debugPrint("📶 État connexion: $state");
+
+        if (firstEvent) {
+          firstEvent = false;
+          return;
+        }
+
         if (state == BluetoothConnectionState.disconnected && mounted) {
           debugPrint("🔴 Appareil déconnecté");
           _handleDisconnection();
         }
       });
 
-      // Découvrir les services
       await _discoverServices(device);
-      
+
     } catch (e) {
       debugPrint("❌ Erreur connexion: $e");
       if (mounted) {
@@ -235,6 +265,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
           _connectedDevice = null;
           _isConnected = false;
         });
+        Future.delayed(const Duration(seconds: 2), _startBLEScan);
       }
     }
   }
@@ -245,40 +276,61 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   Future<void> _discoverServices(BluetoothDevice device) async {
     try {
       debugPrint("🔍 Découverte des services...");
-      
+
+      // ✅ Délai de stabilisation
+      await Future.delayed(const Duration(milliseconds: 800));
+
       List<BluetoothService> services = await device.discoverServices();
-      
+      debugPrint("📋 Nombre de services trouvés: ${services.length}");
+
       for (BluetoothService service in services) {
-        debugPrint("📋 Service: ${service.uuid}");
-        
-        // Chercher notre service RFID
-        if (service.uuid.toString().toLowerCase() == SERVICE_UUID.toLowerCase()) {
-          debugPrint("✅ Service RFID trouvé!");
-          
-          for (BluetoothCharacteristic characteristic in service.characteristics) {
-            debugPrint("   📝 Caractéristique: ${characteristic.uuid}");
-            
-            // Chercher notre caractéristique RFID
-            if (characteristic.uuid.toString().toLowerCase() == CHARACTERISTIC_UUID.toLowerCase()) {
-              debugPrint("✅ Caractéristique RFID trouvée!");
-              
-              _rfidCharacteristic = characteristic;
-              await _subscribeToRFID(characteristic);
-              return;
-            }
-          }
+        debugPrint("📋 Service UUID: ${service.uuid.toString().toLowerCase()}");
+        for (BluetoothCharacteristic c in service.characteristics) {
+          debugPrint("   └─ Caractéristique: ${c.uuid} | notify:${c.properties.notify} | read:${c.properties.read}");
         }
       }
-      
-      // Service non trouvé
-      debugPrint("⚠️ Service RFID non trouvé");
-      _showSnackBar("⚠️ Service RFID non disponible", Colors.orange);
-      
-    } catch (e) {
-      debugPrint("❌ Erreur découverte services: $e");
-      if (mounted) {
-        _showSnackBar("❌ Erreur de communication", Colors.red);
+
+      // ✅ Recherche par contains (plus robuste)
+      BluetoothService? targetService;
+      for (BluetoothService service in services) {
+        if (service.uuid.toString().toLowerCase().contains(
+            SERVICE_UUID.substring(0, 8).toLowerCase())) {
+          targetService = service;
+          debugPrint("✅ Service trouvé!");
+          break;
+        }
       }
+
+      if (targetService == null) {
+        debugPrint("❌ Service introuvable — UUIDs disponibles:");
+        for (var s in services) debugPrint("   → ${s.uuid}");
+        _showSnackBar("❌ Service RFID non trouvé", Colors.red);
+        return;
+      }
+
+      BluetoothCharacteristic? targetChar;
+      for (BluetoothCharacteristic c in targetService.characteristics) {
+        if (c.uuid.toString().toLowerCase().contains(
+            CHARACTERISTIC_UUID.substring(0, 8).toLowerCase())) {
+          targetChar = c;
+          debugPrint("✅ Caractéristique trouvée!");
+          break;
+        }
+      }
+
+      if (targetChar == null) {
+        debugPrint("❌ Caractéristique introuvable");
+        _showSnackBar("❌ Caractéristique RFID non trouvée", Colors.red);
+        return;
+      }
+
+      _rfidCharacteristic = targetChar;
+      await _subscribeToRFID(targetChar);
+
+    } catch (e, stack) {
+      debugPrint("❌ Erreur discoverServices: $e");
+      debugPrint("$stack");
+      if (mounted) _showSnackBar("❌ Erreur de communication", Colors.red);
     }
   }
 
@@ -287,15 +339,28 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   // =====================================================
   Future<void> _subscribeToRFID(BluetoothCharacteristic characteristic) async {
     try {
-      // Activer les notifications
+      // ✅ Attendre stabilisation
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // ✅ Lecture initiale pour réveiller la caractéristique
+      try {
+        final initial = await characteristic.read();
+        if (initial.isNotEmpty) {
+          debugPrint("📖 Valeur initiale: ${utf8.decode(initial)}");
+        }
+      } catch (_) {}
+
+      // ✅ Activer les notifications
       await characteristic.setNotifyValue(true);
-      
+      await Future.delayed(const Duration(milliseconds: 300));
+
       debugPrint("✅ Notifications RFID activées");
       _showSnackBar("✅ Système RFID prêt", Colors.green);
 
-      // Écouter les données
-      _characteristicSubscription = characteristic.lastValueStream.listen(
+      // ✅ onValueReceived au lieu de lastValueStream
+      _characteristicSubscription = characteristic.onValueReceived.listen(
         (value) {
+          debugPrint("📥 Données BLE brutes: $value");
           if (value.isNotEmpty) {
             _onRFIDDataReceived(value);
           }
@@ -304,12 +369,10 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
           debugPrint("❌ Erreur notification: $error");
         },
       );
-      
+
     } catch (e) {
       debugPrint("❌ Erreur souscription: $e");
-      if (mounted) {
-        _showSnackBar("❌ Échec d'activation RFID", Colors.red);
-      }
+      if (mounted) _showSnackBar("❌ Échec d'activation RFID", Colors.red);
     }
   }
 
@@ -318,17 +381,15 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   // =====================================================
   void _onRFIDDataReceived(List<int> value) {
     try {
-      // Convertir les bytes en String
       String uid = utf8.decode(value).trim();
-      
+
       debugPrint("═══════════════════════════════");
       debugPrint("🏷️  UID REÇU VIA BLE : $uid");
       debugPrint("═══════════════════════════════");
 
-      // Anti-spam: ignorer si même UID dans les 2 dernières secondes
       final now = DateTime.now();
-      if (_lastReceivedUID == uid && 
-          _lastScanTime != null && 
+      if (_lastReceivedUID == uid &&
+          _lastScanTime != null &&
           now.difference(_lastScanTime!) < _antiSpamDelay) {
         debugPrint("⏭️  Ignoré (anti-spam)");
         return;
@@ -337,11 +398,8 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
       _lastReceivedUID = uid;
       _lastScanTime = now;
 
-      // Traiter le tag
-      if (mounted) {
-        _onTagDetected(uid);
-      }
-      
+      if (mounted) _onTagDetected(uid);
+
     } catch (e) {
       debugPrint("❌ Erreur décodage UID: $e");
     }
@@ -355,7 +413,6 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
 
     debugPrint("🔍 Validation du tag...");
 
-    // ✅ Valider format RFID
     final validation = Validators.rfid(uid);
     if (validation != null) {
       _showSnackBar("⚠️ Format RFID invalide: $validation", Colors.orange);
@@ -369,7 +426,6 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
 
     _showSnackBar("Tag RFID détecté : $uid", Colors.blue);
 
-    // Vérifier doublon dans la base de données
     try {
       final result = await Supabase.instance.client
           .from('animal_acheter')
@@ -379,13 +435,9 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
       if (result.isNotEmpty) {
         final existing = result.first;
         debugPrint("⚠️ DOUBLON DÉTECTÉ!");
-        
+
         if (mounted) {
-          _showSnackBar(
-            "⚠️ Tag déjà utilisé par: ${existing['nom']}",
-            Colors.orange,
-          );
-          
+          _showSnackBar("⚠️ Tag déjà utilisé par: ${existing['nom']}", Colors.orange);
           Future.delayed(const Duration(milliseconds: 800), () {
             if (mounted) _showDuplicateDialog(existing);
           });
@@ -406,40 +458,43 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
       await _characteristicSubscription?.cancel();
       await _deviceStateSubscription?.cancel();
       await _scanSubscription?.cancel();
-      
+
       if (_connectedDevice != null) {
         await _connectedDevice!.disconnect();
       }
-      
+
       _characteristicSubscription = null;
       _deviceStateSubscription = null;
       _scanSubscription = null;
       _connectedDevice = null;
       _rfidCharacteristic = null;
-      
-      if (mounted) {
-        setState(() => _isConnected = false);
-      }
-      
+
+      if (mounted) setState(() => _isConnected = false);
+
       debugPrint("🔴 Bluetooth déconnecté");
     } catch (e) {
       debugPrint("⚠️ Erreur déconnexion: $e");
     }
   }
 
+  // ✅ Sans boucle infinie — relance uniquement _startBLEScan
   void _handleDisconnection() {
+    if (!mounted) return;
+
+    _deviceStateSubscription?.cancel();
+    _deviceStateSubscription = null;
+
     _showSnackBar("🔴 Lecteur RFID déconnecté", Colors.red);
-    
+
     setState(() {
       _isConnected = false;
       _connectedDevice = null;
       _rfidCharacteristic = null;
     });
-    
-    // Reconnexion automatique
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted && !_isConnected) {
-        _showSnackBar("🔄 Tentative de reconnexion...", Colors.blue);
+
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted && !_isConnected && !_isScanning) {
+        debugPrint("🔄 Relance du scan après déconnexion...");
         _startBLEScan();
       }
     });
@@ -457,11 +512,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        icon: const Icon(
-          Icons.warning_amber_rounded,
-          color: Colors.orange,
-          size: 64,
-        ),
+        icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 64),
         title: const Text(
           "⚠️ Tag RFID déjà utilisé",
           style: TextStyle(fontWeight: FontWeight.bold),
@@ -520,10 +571,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
         children: [
           Icon(icon, size: 20, color: Colors.orange[700]),
           const SizedBox(width: 8),
-          Text(
-            "$label: ",
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
+          Text("$label: ", style: const TextStyle(fontWeight: FontWeight.bold)),
           Expanded(
             child: Text(
               value,
@@ -548,18 +596,12 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
             ListTile(
               leading: const Icon(Icons.camera_alt),
               title: const Text("Caméra"),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.camera);
-              },
+              onTap: () { Navigator.pop(context); _pickImage(ImageSource.camera); },
             ),
             ListTile(
               leading: const Icon(Icons.photo_library),
               title: const Text("Galerie"),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.gallery);
-              },
+              onTap: () { Navigator.pop(context); _pickImage(ImageSource.gallery); },
             ),
           ],
         ),
@@ -571,35 +613,25 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
     try {
       final picker = ImagePicker();
       final XFile? image = await picker.pickImage(
-        source: source,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
+        source: source, maxWidth: 1920, maxHeight: 1080, imageQuality: 85,
       );
-
       if (image != null) {
         setState(() => _pickedFile = image);
         debugPrint("✅ Image sélectionnée: ${image.path}");
       }
     } catch (e, stackTrace) {
       ErrorHandler.log(e, stackTrace, context: 'Sélection image');
-      if (mounted) {
-        ErrorHandler.show(context, e);
-      }
+      if (mounted) ErrorHandler.show(context, e);
     }
   }
 
   Future<String?> _uploadImage(XFile file) async {
     try {
       debugPrint("📤 Début upload image...");
-      
       final bytes = await file.readAsBytes();
       final fileExt = file.path.split('.').last;
       final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
       final filePath = 'animal_acheter/$fileName';
-
-      debugPrint("📁 Chemin: $filePath");
-      debugPrint("📦 Taille: ${bytes.length} bytes");
 
       await Supabase.instance.client.storage
           .from('uploads')
@@ -618,71 +650,39 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
     }
   }
 
-  // ===== ENREGISTREMENT AMÉLIORÉ =====
+  // ===== ENREGISTREMENT =====
   Future<void> _enregistrer() async {
     debugPrint("═══════════════════════════════════════");
     debugPrint("🚀 DÉBUT ENREGISTREMENT");
     debugPrint("═══════════════════════════════════════");
 
-    // ✅ VALIDATION DES CHAMPS AVEC MESSAGES DÉTAILLÉS
-    debugPrint("📋 Validation des champs...");
-    
     if (_nomController.text.trim().isEmpty) {
-      debugPrint("❌ Nom vide");
-      ErrorHandler.show(context, "Le nom est requis");
-      return;
+      ErrorHandler.show(context, "Le nom est requis"); return;
     }
-    debugPrint("✅ Nom: ${_nomController.text.trim()}");
-
     if (_provenanceController.text.trim().isEmpty) {
-      debugPrint("❌ Provenance vide");
-      ErrorHandler.show(context, "La provenance est requise");
-      return;
+      ErrorHandler.show(context, "La provenance est requise"); return;
     }
-    debugPrint("✅ Provenance: ${_provenanceController.text.trim()}");
-
     if (_selectedRace == null || _selectedRace!.trim().isEmpty) {
-      debugPrint("❌ Race non sélectionnée");
-      ErrorHandler.show(context, "La race est requise");
-      return;
+      ErrorHandler.show(context, "La race est requise"); return;
     }
-    debugPrint("✅ Race: $_selectedRace");
-
     if (_selectedSexe == null) {
-      debugPrint("❌ Sexe non sélectionné");
-      ErrorHandler.show(context, "Le sexe est requis");
-      return;
+      ErrorHandler.show(context, "Le sexe est requis"); return;
     }
-    debugPrint("✅ Sexe: $_selectedSexe");
-
     if (_pickedFile == null) {
-      debugPrint("❌ Aucune photo");
-      ErrorHandler.show(context, "Une photo est requise");
-      return;
+      ErrorHandler.show(context, "Une photo est requise"); return;
     }
-    debugPrint("✅ Photo: ${_pickedFile!.path}");
-
     if (_tagRFID == null) {
-      debugPrint("❌ Aucun tag RFID");
-      ErrorHandler.show(context, "Scannez un tag RFID");
-      return;
+      ErrorHandler.show(context, "Scannez un tag RFID"); return;
     }
-    debugPrint("✅ Tag RFID: $_tagRFID");
 
     final rfidValidation = Validators.rfid(_tagRFID);
     if (rfidValidation != null) {
-      debugPrint("❌ Validation RFID échouée: $rfidValidation");
-      ErrorHandler.show(context, rfidValidation);
-      return;
+      ErrorHandler.show(context, rfidValidation); return;
     }
-    debugPrint("✅ Tag RFID validé");
 
     setState(() => _isLoading = true);
 
     try {
-      debugPrint("🔍 Vérification doublon...");
-      
-      // Vérification finale doublon
       final existing = await Supabase.instance.client
           .from('animal_acheter')
           .select('id, nom')
@@ -690,31 +690,18 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
           .maybeSingle();
 
       if (existing != null) {
-        debugPrint("⚠️ Tag déjà utilisé: ${existing['nom']}");
         if (mounted) {
           setState(() => _isLoading = false);
           await _showDuplicateDialog(existing);
         }
         return;
       }
-      debugPrint("✅ Tag disponible");
 
-      // Upload image
-      debugPrint("📤 Upload de l'image...");
       final url = await _uploadImage(_pickedFile!);
-      if (url == null) {
-        debugPrint("❌ Échec upload image");
-        throw Exception("Erreur upload image");
-      }
-      debugPrint("✅ Image uploadée: $url");
+      if (url == null) throw Exception("Erreur upload image");
 
-      // ✅ Préparer les données
       final userId = Supabase.instance.client.auth.currentUser?.id;
-      if (userId == null) {
-        debugPrint("❌ Utilisateur non connecté");
-        throw Exception("Utilisateur non connecté");
-      }
-      debugPrint("✅ User ID: $userId");
+      if (userId == null) throw Exception("Utilisateur non connecté");
 
       final dataToInsert = {
         'nom': Validators.sanitize(_nomController.text),
@@ -727,11 +714,8 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
         'created_at': DateTime.now().toIso8601String(),
       };
 
-      debugPrint("📝 Données à insérer:");
-      debugPrint(dataToInsert.toString());
+      debugPrint("📝 Données à insérer: $dataToInsert");
 
-      // Insertion dans Supabase
-      debugPrint("💾 Insertion dans Supabase...");
       await Supabase.instance.client
           .from('animal_acheter')
           .insert(dataToInsert);
@@ -742,22 +726,13 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
         ErrorHandler.showSuccess(context, "✅ Animal acheté enregistré avec succès!");
         _resetForm();
       }
-      
+
     } catch (error, stackTrace) {
-      debugPrint("═══════════════════════════════════════");
-      debugPrint("❌ ERREUR LORS DE L'ENREGISTREMENT");
-      debugPrint("Erreur: $error");
-      debugPrint("Stack: $stackTrace");
-      debugPrint("═══════════════════════════════════════");
-      
+      debugPrint("❌ ERREUR: $error");
       ErrorHandler.log(error, stackTrace, context: 'Enregistrement animal acheté');
-      if (mounted) {
-        ErrorHandler.show(context, error);
-      }
+      if (mounted) ErrorHandler.show(context, error);
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -765,6 +740,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
     _nomController.clear();
     _raceController.clear();
     _provenanceController.clear();
+    _dateController.clear();
     _uidController.clear();
     setState(() {
       _selectedSexe = null;
@@ -777,11 +753,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        duration: const Duration(seconds: 2),
-      ),
+      SnackBar(content: Text(message), backgroundColor: color, duration: const Duration(seconds: 2)),
     );
   }
 
@@ -793,19 +765,18 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
         title: const Text("Jur Gui 4.0 - Animal Acheté"),
         backgroundColor: Colors.green[700],
         actions: [
-          // Icône Bluetooth avec état
           IconButton(
             icon: Icon(
-              _isConnected ? Icons.bluetooth_connected : 
-              _isScanning ? Icons.bluetooth_searching : 
+              _isConnected ? Icons.bluetooth_connected :
+              _isScanning ? Icons.bluetooth_searching :
               Icons.bluetooth_disabled,
-              color: _isConnected ? Colors.white : 
-                     _isScanning ? Colors.blue : 
+              color: _isConnected ? Colors.white :
+                     _isScanning ? Colors.blue :
                      Colors.orange,
             ),
             onPressed: _isConnected ? null : _reconnectBLE,
-            tooltip: _isConnected ? "Connecté" : 
-                    _isScanning ? "Recherche..." : 
+            tooltip: _isConnected ? "Connecté" :
+                    _isScanning ? "Recherche..." :
                     "Reconnecter",
           ),
         ],
@@ -816,7 +787,6 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  // Indicateur de connexion BLE
                   _buildBLEStatusCard(),
                   const SizedBox(height: 16),
                   _buildPhotoSection(),
@@ -838,7 +808,6 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
     );
   }
 
-  // Carte d'état BLE
   Widget _buildBLEStatusCard() {
     String statusText;
     Color statusColor;
@@ -872,11 +841,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
           Expanded(
             child: Text(
               statusText,
-              style: TextStyle(
-                color: statusColor,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
+              style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 16),
             ),
           ),
           if (!_isConnected && !_isScanning)
@@ -904,12 +869,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
           _pickedFile != null
               ? ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.file(
-                    File(_pickedFile!.path),
-                    height: 150,
-                    width: 150,
-                    fit: BoxFit.cover,
-                  ),
+                  child: Image.file(File(_pickedFile!.path), height: 150, width: 150, fit: BoxFit.cover),
                 )
               : const Icon(Icons.camera_alt, size: 80, color: Colors.grey),
           const SizedBox(height: 8),
@@ -918,8 +878,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
             icon: const Icon(Icons.add_a_photo),
             label: const Text("Ajouter photo"),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green[700],
-              foregroundColor: Colors.white,
+              backgroundColor: Colors.green[700], foregroundColor: Colors.white,
             ),
           ),
         ],
@@ -931,9 +890,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
     return TextFormField(
       controller: controller,
       decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-        prefixIcon: Icon(icon),
+        labelText: label, border: const OutlineInputBorder(), prefixIcon: Icon(icon),
       ),
     );
   }
@@ -942,9 +899,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
     return DropdownButtonFormField<String>(
       value: _selectedSexe,
       decoration: const InputDecoration(
-        labelText: "Sexe *",
-        border: OutlineInputBorder(),
-        prefixIcon: Icon(Icons.wc),
+        labelText: "Sexe *", border: OutlineInputBorder(), prefixIcon: Icon(Icons.wc),
       ),
       items: const [
         DropdownMenuItem(value: "Mâle", child: Text("Mâle")),
@@ -958,9 +913,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
     return DropdownButtonFormField<String>(
       value: _selectedRace,
       decoration: const InputDecoration(
-        labelText: "Race *",
-        border: OutlineInputBorder(),
-        prefixIcon: Icon(Icons.agriculture),
+        labelText: "Race *", border: OutlineInputBorder(), prefixIcon: Icon(Icons.agriculture),
       ),
       items: const [
         DropdownMenuItem(value: "Ladoum", child: Text("Ladoum")),
@@ -970,9 +923,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
       onChanged: (val) {
         setState(() {
           _selectedRace = val;
-          if (val != null) {
-            _raceController.text = val;
-          }
+          if (val != null) _raceController.text = val;
         });
       },
     );
@@ -996,10 +947,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
           fontWeight: FontWeight.bold,
         ),
       ),
-      style: const TextStyle(
-        fontWeight: FontWeight.bold,
-        color: Colors.blue,
-      ),
+      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
     );
   }
 
@@ -1011,8 +959,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
         onPressed: _isLoading ? null : _enregistrer,
         icon: _isLoading
             ? const SizedBox(
-                width: 20,
-                height: 20,
+                width: 20, height: 20,
                 child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
               )
             : const Icon(Icons.check_circle),
@@ -1021,8 +968,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
           style: const TextStyle(fontSize: 16),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.green[700],
-          foregroundColor: Colors.white,
+          backgroundColor: Colors.green[700], foregroundColor: Colors.white,
         ),
       ),
     );

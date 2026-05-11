@@ -1,4 +1,4 @@
-import 'package:depart/Eleveures/New/Accouplemt/Accouplement.dart';
+import 'package:depart/Eleveures/New/Accouplemt/Accouplement..dart';
 import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
 import 'package:depart/Eleveures/New/chaleur/ChaleurModule.dart';
 import 'package:depart/pages/Bienvenue/acceuil.dart';
@@ -66,7 +66,7 @@ class MyApp extends StatelessWidget {
             // TODO OPTIONNEL: Charger les données de la brebis et les passer en argument
             // Pour l'instant, ouvre la page sans pré-sélection
           }
-          return const EnregistrerAccouplement();
+          return  EnregistrerAccouplement();
         },
       },
     );

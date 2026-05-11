@@ -268,7 +268,7 @@ class _InscriptionState extends State<Inscription> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Couleur.PremierColor.withOpacity(0.1),
+        color: Couleur.premierColor.withOpacity(0.1),
         shape: BoxShape.circle,
       ),
       child: Image.asset(
@@ -279,7 +279,7 @@ class _InscriptionState extends State<Inscription> {
           return Icon(
             Icons.pets,
             size: 80,
-            color: Couleur.PremierColor,
+            color: Couleur.premierColor,
           );
         },
       ),
@@ -294,7 +294,7 @@ class _InscriptionState extends State<Inscription> {
           style: TextStyle(
             fontSize: 32,
             fontWeight: FontWeight.bold,
-            color: Couleur.PremierColor,
+            color: Couleur.premierColor,
           ),
         ),
         const SizedBox(height: 8),
@@ -423,7 +423,7 @@ class _InscriptionState extends State<Inscription> {
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
-        prefixIcon: Icon(icon, color: Couleur.PremierColor),
+        prefixIcon: Icon(icon, color: Couleur.premierColor),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
         ),
@@ -448,7 +448,7 @@ class _InscriptionState extends State<Inscription> {
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
-        prefixIcon: Icon(Icons.lock_outline, color: Couleur.PremierColor),
+        prefixIcon: Icon(Icons.lock_outline, color: Couleur.premierColor),
         suffixIcon: IconButton(
           icon: Icon(
             obscure ? Icons.visibility_off : Icons.visibility,
@@ -472,7 +472,7 @@ class _InscriptionState extends State<Inscription> {
       child: ElevatedButton(
         onPressed: _isLoading ? null : _signUp,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Couleur.PremierColor,
+          backgroundColor: Couleur.premierColor,
           foregroundColor: Colors.white,
           disabledBackgroundColor: Colors.grey[300],
           shape: RoundedRectangleBorder(

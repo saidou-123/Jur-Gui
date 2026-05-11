@@ -3,10 +3,10 @@
 // Fichier: lib/pages/Interface/interfaceEleveur.dart
 // ============================================================
 
+import 'package:depart/Eleveures/Ajouter%20Animal/AjouterAnimal.dart';
 import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDBluetooth.dart';
-import 'package:depart/Eleveures/Mon%20Troupeau/SupprimerAnimal/AnimalDeletePage.dart';
-import 'package:depart/Eleveures/New/Accouplemt/Accouplement.dart';
-import 'package:depart/Eleveures/New/Dashboard/DashboardReproduction.dart';
+import 'package:depart/Eleveures/New/Accouplemt/Accouplement..dart';
+import 'package:depart/Eleveures/New/Accouplemt/ConsanguiniteService.dart';
 import 'package:depart/Eleveures/New/Notification/NotificationsViewPage.dart';
 import 'package:depart/Eleveures/New/chaleur/ChaleurModule.dart';
 import 'package:flutter/material.dart';
@@ -302,7 +302,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
           ? _buildLoadingState()
           : RefreshIndicator(
               onRefresh: _handleRefresh,
-              color: Couleur.PremierColor,
+              color: Couleur.premierColor,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
@@ -340,9 +340,9 @@ class _interfaceElevaureState extends State<interfaceElevaur>
       ),
       centerTitle: true,
       backgroundColor: Colors.white,
-      foregroundColor: Couleur.PremierColor,
+      foregroundColor: Couleur.premierColor,
       elevation: 2,
-      iconTheme: IconThemeData(color: Couleur.PremierColor),
+      iconTheme: IconThemeData(color: Couleur.premierColor),
     );
   }
 
@@ -351,11 +351,11 @@ class _interfaceElevaureState extends State<interfaceElevaur>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          CircularProgressIndicator(color: Couleur.PremierColor),
+          CircularProgressIndicator(color: Couleur.premierColor),
           const SizedBox(height: 16),
           Text(
             "Chargement...",
-            style: TextStyle(color: Couleur.PremierColor, fontSize: 16),
+            style: TextStyle(color: Couleur.premierColor, fontSize: 16),
           ),
         ],
       ),
@@ -368,8 +368,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Couleur.PremierColor,
-            Couleur.PremierColor.withOpacity(0.8),
+            Couleur.premierColor,
+            Couleur.premierColor.withOpacity(0.8),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -377,7 +377,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Couleur.PremierColor.withOpacity(0.3),
+            color: Couleur.premierColor.withOpacity(0.3),
             blurRadius: 8,
             offset: const Offset(0, 4),
           ),
@@ -505,14 +505,14 @@ class _interfaceElevaureState extends State<interfaceElevaur>
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Couleur.PremierColor,
-            Couleur.PremierColor.withOpacity(0.8),
+            Couleur.premierColor,
+            Couleur.premierColor.withOpacity(0.8),
           ],
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Couleur.PremierColor.withOpacity(0.4),
+            color: Couleur.premierColor.withOpacity(0.4),
             blurRadius: 12,
             offset: const Offset(0, 6),
           ),
@@ -565,7 +565,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
-                      foregroundColor: Couleur.PremierColor,
+                      foregroundColor: Couleur.premierColor,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 20,
                         vertical: 15,
@@ -615,7 +615,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
           },
           icon: const Icon(Icons.arrow_forward, size: 16),
           label: const Text("Voir tout"),
-          style: TextButton.styleFrom(foregroundColor: Couleur.PremierColor),
+          style: TextButton.styleFrom(foregroundColor: Couleur.premierColor),
         ),
       ],
     );
@@ -652,7 +652,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               child: optioncardEleveur(
                 image: 'assets/image/img5.png',
                 label: "Accouplement",
-                route: const EnregistrerAccouplement(),
+                route: EnregistrerAccouplement(),
                 backgroundColor: const Color(0xFFFCE4EC),
               ),
             ),
@@ -661,7 +661,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               child: optioncardEleveur(
                 image: 'assets/image/img14.png',
                 label: 'Ajouter Animal',
-                route: const  AnimalDeletePage (),
+                route: const  AjouterAnimal (),
                 backgroundColor: const Color(0xFFFFF9C4),
               ),
             ),
@@ -695,8 +695,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  Couleur.PremierColor,
-                  Couleur.PremierColor.withOpacity(0.8),
+                  Couleur.premierColor,
+                  Couleur.premierColor.withOpacity(0.8),
                 ],
               ),
             ),
@@ -757,6 +757,3 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     );
   }
 }
-
-
-

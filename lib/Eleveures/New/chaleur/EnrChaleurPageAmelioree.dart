@@ -2,7 +2,8 @@
 // ENREGISTRER CHALEUR - VERSION CORRIGÉE
 // Fix: Gestion correcte des IDs mixtes (int pour nee, UUID pour achete)
 // ============================================================
-import 'package:depart/Eleveures/New/Accouplemt/Accouplement.dart';
+import 'package:depart/Eleveures/New/Accouplemt/Accouplement..dart';
+import 'package:depart/Eleveures/New/Accouplemt/ConsanguiniteService.dart';
 import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
 import 'package:depart/Eleveures/New/Reproduction/ReproductionBusinessService.dart';
 import 'package:depart/Eleveures/New/Reproduction/ReproductionConfig.dart';
@@ -341,10 +342,7 @@ class _EnregistrerChaleurPageAmelioreeState
               final result = await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => EnregistrerAccouplement(
-                    brebisPreSelectionnee: widget.brebis,
-                    sourcePreSelectionnee: widget.source,
-                  ),
+                  builder: (context) => EnregistrerAccouplement(),
                 ),
               );
               // Retourner au module avec le résultat
