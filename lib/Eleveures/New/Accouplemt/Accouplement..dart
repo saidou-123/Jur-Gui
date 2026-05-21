@@ -217,7 +217,13 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       }
       if (mounted) setState(() {});
     } catch (e) {
-      debugPrint('⚠️ Infos brebis: $e');
+      // La table "chaleurs" n'existe peut-être pas encore dans Supabase.
+      // Ce catch est intentionnellement silencieux pour ne pas bloquer le flux,
+      // mais on log l'erreur complète pour diagnostic.
+      debugPrint('⚠️ Table chaleurs — erreur ou table manquante: $e');
+      _derniereChaleur = null;
+      _chaleurRecente  = false;
+      if (mounted) setState(() {});
     }
   }
 
@@ -290,10 +296,12 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
         _heureAccouplement.minute,
       );
 
-      // Les IDs Supabase peuvent être des UUID (String) ou des int.
-      // On ne tente plus de convertir en int pour éviter le FormatException.
-      final brebisId = _brebisSelectionnee!['id'];
-      final belierId = _belierSelectionne!['id'];
+      final brebisId = _brebisSelectionnee!['id'] is String
+          ? int.parse(_brebisSelectionnee!['id'])
+          : _brebisSelectionnee!['id'] as int;
+      final belierId = _belierSelectionne!['id'] is String
+          ? int.parse(_belierSelectionne!['id'])
+          : _belierSelectionne!['id'] as int;
 
       // Vérification métier
       final validation = await _businessService.peutAccoupler(
@@ -578,6 +586,49 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
   // ──────────────────────────────────────────────────────────
   // UTILITAIRES
   // ──────────────────────────────────────────────────────────
+  /// Avatar circulaire avec photo (si image_url dispo) ou icône fallback.
+  Widget _buildAnimalAvatar({
+    required String? imageUrl,
+    required IconData fallbackIcon,
+    required Color    color,
+    double radius = 24,
+  }) {
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      return CircleAvatar(
+        radius          : radius,
+        backgroundColor : color.withOpacity(0.1),
+        child           : ClipOval(
+          child: Image.network(
+            imageUrl,
+            width     : radius * 2,
+            height    : radius * 2,
+            fit       : BoxFit.cover,
+            errorBuilder: (_, __, ___) => Icon(
+              fallbackIcon,
+              color : color,
+              size  : radius,
+            ),
+            loadingBuilder: (_, child, progress) => progress == null
+                ? child
+                : SizedBox(
+                    width : radius * 2,
+                    height: radius * 2,
+                    child : CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color      : color,
+                    ),
+                  ),
+          ),
+        ),
+      );
+    }
+    return CircleAvatar(
+      radius         : radius,
+      backgroundColor: color.withOpacity(0.1),
+      child          : Icon(fallbackIcon, color: color, size: radius),
+    );
+  }
+
   Widget _buildInfoBox(String titre, String contenu, Color color) {
     return Container(
       padding   : const EdgeInsets.all(12),
@@ -710,29 +761,169 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
               ],
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value    : _brebisSelectionnee?['id']?.toString(),
-              decoration: const InputDecoration(
-                border  : OutlineInputBorder(),
-                hintText: 'Choisir une brebis',
-              ),
-              items: _brebisDisponibles.map((b) {
-                return DropdownMenuItem(
-                  value: b['id'].toString(),
-                  child: Text('${b['nom']} (${b['race']})'),
+
+            // ── Champ saisie + autocomplétion ─────────────────
+            Autocomplete<Map<String, dynamic>>(
+              displayStringForOption: (b) => '${b['nom']} (${b['race']})',
+
+              initialValue: _brebisSelectionnee != null
+                  ? TextEditingValue(
+                      text:
+                          '${_brebisSelectionnee!['nom']} (${_brebisSelectionnee!['race']})',
+                    )
+                  : null,
+
+              optionsBuilder: (TextEditingValue textEditingValue) {
+                if (textEditingValue.text.isEmpty) {
+                  return _brebisDisponibles;
+                }
+                final query = textEditingValue.text.toLowerCase();
+                return _brebisDisponibles.where((b) {
+                  final nom  = (b['nom']  ?? '').toString().toLowerCase();
+                  final race = (b['race'] ?? '').toString().toLowerCase();
+                  final rfid = (b['tag_rfid'] ?? '').toString().toLowerCase();
+                  return nom.contains(query) ||
+                         race.contains(query) ||
+                         rfid.contains(query);
+                });
+              },
+
+              optionsViewBuilder: (context, onSelected, options) {
+                final primaryColor = Color(ReproductionConfig.colorPrimary);
+                return Align(
+                  alignment: Alignment.topLeft,
+                  child: Material(
+                    elevation    : 6,
+                    borderRadius : BorderRadius.circular(12),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: 280,
+                        maxWidth : MediaQuery.of(context).size.width - 64,
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: ListView.separated(
+                          padding    : EdgeInsets.zero,
+                          shrinkWrap : true,
+                          itemCount  : options.length,
+                          separatorBuilder: (_, __) => Divider(
+                            height: 1,
+                            color : Colors.grey.shade200,
+                          ),
+                          itemBuilder: (ctx, index) {
+                            final brebis = options.elementAt(index);
+                            final estSelectionnee =
+                                _brebisSelectionnee?['id']?.toString() ==
+                                brebis['id']?.toString();
+                            return InkWell(
+                              onTap: () => onSelected(brebis),
+                              child: Container(
+                                color  : estSelectionnee
+                                    ? primaryColor.withOpacity(0.07)
+                                    : Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                child: Row(
+                                  children: [
+                                    // ── Photo ou icône ──────
+                                    _buildAnimalAvatar(
+                                      imageUrl    : brebis['image_url'],
+                                      fallbackIcon: Icons.female,
+                                      color       : primaryColor,
+                                      radius      : 22,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    // ── Nom + race ──────────
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            brebis['nom'] ?? '—',
+                                            style: TextStyle(
+                                              fontSize  : 14,
+                                              fontWeight: estSelectionnee
+                                                  ? FontWeight.bold
+                                                  : FontWeight.w500,
+                                            ),
+                                          ),
+                                          if ((brebis['race'] ?? '')
+                                              .isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              brebis['race'],
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color   : Colors.grey.shade600,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                    // ── Coche si sélectionnée ─
+                                    if (estSelectionnee)
+                                      Icon(Icons.check_circle,
+                                          color: primaryColor, size: 20),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
                 );
-              }).toList(),
-              onChanged: (value) async {
+              },
+
+              fieldViewBuilder: (
+                context,
+                textEditingController,
+                focusNode,
+                onFieldSubmitted,
+              ) {
+                return TextFormField(
+                  controller: textEditingController,
+                  focusNode : focusNode,
+                  decoration: InputDecoration(
+                    border    : const OutlineInputBorder(),
+                    hintText  : 'Chercher ou saisir le nom de la brebis...',
+                    prefixIcon: Icon(Icons.search,
+                        color: Color(ReproductionConfig.colorPrimary)),
+                    suffixIcon: _brebisSelectionnee != null
+                        ? IconButton(
+                            icon    : const Icon(Icons.clear, size: 18),
+                            tooltip : 'Effacer',
+                            onPressed: () {
+                              textEditingController.clear();
+                              setState(() {
+                                _brebisSelectionnee = null;
+                                _derniereChaleur    = null;
+                                _chaleurRecente     = false;
+                                _reinitialiserAnalyse();
+                              });
+                            },
+                          )
+                        : null,
+                  ),
+                  onFieldSubmitted: (_) => onFieldSubmitted(),
+                  validator: (_) =>
+                      _brebisSelectionnee == null ? 'Champ requis' : null,
+                );
+              },
+
+              onSelected: (brebis) async {
                 setState(() {
-                  _brebisSelectionnee = _brebisDisponibles
-                      .firstWhere((b) => b['id'].toString() == value);
+                  _brebisSelectionnee = brebis;
                   _reinitialiserAnalyse();
                   _derniereChaleur = null;
                   _chaleurRecente  = false;
                 });
                 await _chargerInfosBrebis();
               },
-              validator: (v) => v == null ? 'Champ requis' : null,
             ),
 
             // Bandeau chaleur
@@ -821,27 +1012,204 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
               ],
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value    : _belierSelectionne?['id']?.toString(),
-              decoration: const InputDecoration(
-                border  : OutlineInputBorder(),
-                hintText: 'Choisir un bélier',
-              ),
-              items: _beliersDisponibles.map((b) {
-                return DropdownMenuItem(
-                  value: b['id'].toString(),
-                  child: Text('${b['nom']} (${b['race']})'),
+
+            // ── Champ saisie + autocomplétion ─────────────────
+            Autocomplete<Map<String, dynamic>>(
+              // Affiche le nom du bélier sélectionné dans le champ
+              displayStringForOption: (b) => '${b['nom']} (${b['race']})',
+
+              // Valeur initiale si un bélier est déjà sélectionné
+              initialValue: _belierSelectionne != null
+                  ? TextEditingValue(
+                      text:
+                          '${_belierSelectionne!['nom']} (${_belierSelectionne!['race']})',
+                    )
+                  : null,
+
+              // Filtrage des suggestions selon la saisie
+              optionsBuilder: (TextEditingValue textEditingValue) {
+                if (textEditingValue.text.isEmpty) {
+                  return _beliersDisponibles; // affiche tout si vide
+                }
+                final query = textEditingValue.text.toLowerCase();
+                return _beliersDisponibles.where((b) {
+                  final nom   = (b['nom']  ?? '').toString().toLowerCase();
+                  final race  = (b['race'] ?? '').toString().toLowerCase();
+                  final rfid  = (b['tag_rfid'] ?? '').toString().toLowerCase();
+                  return nom.contains(query) ||
+                         race.contains(query) ||
+                         rfid.contains(query);
+                });
+              },
+
+              // Rendu de chaque suggestion dans la liste déroulante
+              optionsViewBuilder: (context, onSelected, options) {
+                return Align(
+                  alignment: Alignment.topLeft,
+                  child: Material(
+                    elevation    : 6,
+                    borderRadius : BorderRadius.circular(12),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: 280,
+                        maxWidth : MediaQuery.of(context).size.width - 64,
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: ListView.separated(
+                          padding    : EdgeInsets.zero,
+                          shrinkWrap : true,
+                          itemCount  : options.length,
+                          separatorBuilder: (_, __) => Divider(
+                            height: 1,
+                            color : Colors.grey.shade200,
+                          ),
+                          itemBuilder: (ctx, index) {
+                            final belier = options.elementAt(index);
+                            final estSelectionne =
+                                _belierSelectionne?['id']?.toString() ==
+                                belier['id']?.toString();
+                            return InkWell(
+                              onTap: () => onSelected(belier),
+                              child: Container(
+                                color  : estSelectionne
+                                    ? Colors.blue.shade50
+                                    : Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                child: Row(
+                                  children: [
+                                    // ── Photo ou icône ──────
+                                    _buildAnimalAvatar(
+                                      imageUrl    : belier['image_url'],
+                                      fallbackIcon: Icons.male,
+                                      color       : Colors.blue.shade700,
+                                      radius      : 22,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    // ── Nom + race ──────────
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            belier['nom'] ?? '—',
+                                            style: TextStyle(
+                                              fontSize  : 14,
+                                              fontWeight: estSelectionne
+                                                  ? FontWeight.bold
+                                                  : FontWeight.w500,
+                                            ),
+                                          ),
+                                          if ((belier['race'] ?? '')
+                                              .isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              belier['race'],
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color   : Colors.grey.shade600,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                    // ── Coche si sélectionné ─
+                                    if (estSelectionne)
+                                      Icon(Icons.check_circle,
+                                          color: Colors.blue.shade700,
+                                          size : 20),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
                 );
-              }).toList(),
-              onChanged: (value) {
+              },
+
+              // Champ de saisie
+              fieldViewBuilder: (
+                context,
+                textEditingController,
+                focusNode,
+                onFieldSubmitted,
+              ) {
+                return TextFormField(
+                  controller: textEditingController,
+                  focusNode : focusNode,
+                  decoration: InputDecoration(
+                    border     : const OutlineInputBorder(),
+                    hintText   : 'Chercher ou saisir le nom du bélier...',
+                    prefixIcon : Icon(Icons.search,
+                        color: Colors.blue.shade700),
+                    suffixIcon : _belierSelectionne != null
+                        ? IconButton(
+                            icon    : const Icon(Icons.clear, size: 18),
+                            tooltip : 'Effacer',
+                            onPressed: () {
+                              textEditingController.clear();
+                              setState(() {
+                                _belierSelectionne = null;
+                                _reinitialiserAnalyse();
+                              });
+                            },
+                          )
+                        : null,
+                  ),
+                  onFieldSubmitted: (_) => onFieldSubmitted(),
+                  validator: (_) =>
+                      _belierSelectionne == null ? 'Champ requis' : null,
+                );
+              },
+
+              // Quand l'utilisateur sélectionne une suggestion
+              onSelected: (belier) {
                 setState(() {
-                  _belierSelectionne = _beliersDisponibles
-                      .firstWhere((b) => b['id'].toString() == value);
+                  _belierSelectionne = belier;
                   _reinitialiserAnalyse();
                 });
               },
-              validator: (v) => v == null ? 'Champ requis' : null,
             ),
+
+            // Bandeau récapitulatif du bélier sélectionné
+            if (_belierSelectionne != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding   : const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color       : Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border      : Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.check_circle,
+                        color: Colors.blue.shade700, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '${_belierSelectionne!['nom']} · '
+                        '${_belierSelectionne!['race'] ?? ''}'
+                        '${_belierSelectionne!['tag_rfid'] != null ? ' · RFID: ${_belierSelectionne!['tag_rfid']}' : ''}',
+                        style: TextStyle(
+                          fontSize  : 12,
+                          color     : Colors.blue.shade800,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),

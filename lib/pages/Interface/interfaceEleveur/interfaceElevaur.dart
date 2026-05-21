@@ -9,6 +9,7 @@ import 'package:depart/Eleveures/New/Accouplemt/Accouplement..dart';
 import 'package:depart/Eleveures/New/Accouplemt/ConsanguiniteService.dart';
 import 'package:depart/Eleveures/New/Notification/NotificationsViewPage.dart';
 import 'package:depart/Eleveures/New/chaleur/ChaleurModule.dart';
+import 'package:depart/Eleveures/New/genealogique/ArbreGenealogique.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:depart/Eleveures/Mon%20Troupeau/Mon_Troupeau.dart';
@@ -673,8 +674,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
             Expanded(
               child: optioncardEleveur(
                 image: 'assets/image/img5.png',
-                label: "Mes Notifications",
-                route: const NotificationsViewPage(),
+                label: "Genealogique",
+                route: const ArbreGenealogique(),
                 backgroundColor: const Color(0xFFE3F2FD),
               ),
             ),

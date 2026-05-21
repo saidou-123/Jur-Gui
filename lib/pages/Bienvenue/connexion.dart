@@ -121,7 +121,7 @@ class _ConnexionState extends State<Connexion> {
     if (role.toLowerCase() == 'eleveur') {
       destination = const interfaceElevaur();
     } else if (role.toLowerCase() == 'veterinaire') {
-      destination = const InterfaceVeterinaire();
+      destination = const interfaceVeterinaire();
     } else {
       // Par défaut, rediriger vers éleveur
       debugPrint('⚠️ Rôle inconnu: $role, redirection vers éleveur');
@@ -185,7 +185,7 @@ class _ConnexionState extends State<Connexion> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Couleur.premierColor.withOpacity(0.1),
+        color: Couleur.PremierColor.withOpacity(0.1),
         shape: BoxShape.circle,
       ),
       child: Image.asset(
@@ -196,7 +196,7 @@ class _ConnexionState extends State<Connexion> {
           return Icon(
             Icons.pets,
             size: 80,
-            color: Couleur.premierColor,
+            color: Couleur.PremierColor,
           );
         },
       ),
@@ -211,7 +211,7 @@ class _ConnexionState extends State<Connexion> {
           style: TextStyle(
             fontSize: 32,
             fontWeight: FontWeight.bold,
-            color: Couleur.premierColor,
+            color: Couleur.PremierColor,
           ),
         ),
         const SizedBox(height: 8),
@@ -237,7 +237,7 @@ class _ConnexionState extends State<Connexion> {
         hintText: "votre.email@example.com",
         prefixIcon: Icon(
           Icons.email_outlined,
-          color: Couleur.premierColor,
+          color: Couleur.PremierColor,
         ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -265,7 +265,7 @@ class _ConnexionState extends State<Connexion> {
         hintText: "Votre mot de passe",
         prefixIcon: Icon(
           Icons.lock_outline,
-          color: Couleur.premierColor,
+          color: Couleur.PremierColor,
         ),
         suffixIcon: IconButton(
           icon: Icon(
@@ -299,7 +299,7 @@ class _ConnexionState extends State<Connexion> {
         child: Text(
           'Mot de passe oublié ?',
           style: TextStyle(
-            color: Couleur.premierColor,
+            color: Couleur.PremierColor,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -314,7 +314,7 @@ class _ConnexionState extends State<Connexion> {
       child: ElevatedButton(
         onPressed: _isLoading ? null : _signIn,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Couleur.premierColor,
+          backgroundColor: Couleur.PremierColor,
           foregroundColor: Colors.white,
           disabledBackgroundColor: Colors.grey[300],
           shape: RoundedRectangleBorder(
