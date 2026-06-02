@@ -13,6 +13,14 @@
 //   8. Insertion Supabase avec colonnes IA complètes
 //   9. Notifications agnelage (J-30, J-7, J-1)
 //  10. Dialog de succès + retour liste
+//
+// ✅ CORRECTION BUG N+1 (v2) :
+//   AVANT : pour N brebis → N+2 requêtes HTTP (1 par brebis pour gestation)
+//   APRÈS : exactement 3 requêtes fixes quel que soit le nombre de brebis
+//     - Requête 1 : toutes les femelles achetées
+//     - Requête 2 : toutes les femelles nées
+//     - Requête 3 : tous les accouplements sans mise_bas (une seule fois)
+//   Le filtrage des gestantes se fait ensuite en mémoire avec un Set O(1).
 // ============================================================
 
 import 'package:depart/Eleveures/New/Accouplemt/ConsanguiniteService.dart';
@@ -120,75 +128,151 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
     }
   }
 
+  // ──────────────────────────────────────────────────────────
+  // ✅ VERSION CORRIGÉE — 3 requêtes fixes au lieu de N+2
+  //
+  // PROBLÈME ORIGINAL (bug N+1) :
+  //   Pour chaque brebis dans la liste, une requête Supabase séparée
+  //   était faite pour vérifier si elle est gestante.
+  //   Exemple : 50 brebis = 52 requêtes HTTP → lent + consomme des données.
+  //
+  // SOLUTION :
+  //   Étape 1 — Charger toutes les femelles (2 requêtes parallèles)
+  //   Étape 2 — Charger TOUS les accouplements sans mise_bas (1 requête)
+  //   Étape 3 — Construire un Set des clés "source_id" des gestantes
+  //   Étape 4 — Filtrer en mémoire avec Set.contains() en O(1)
+  //
+  //   Résultat : toujours 3 requêtes, peu importe la taille du troupeau.
+  // ──────────────────────────────────────────────────────────
   Future<List<Map<String, dynamic>>> _chargerBrebisDisponibles(
       String userId) async {
+
+    // ── Étape 1 : charger toutes les femelles en parallèle ──
     List<Map<String, dynamic>> toutes = [];
 
-    // Femelles achetées
-    try {
-      final r = await supabase
+    final results = await Future.wait([
+      // Femelles achetées
+      supabase
           .from('animal_acheter')
           .select('id, nom, race, image_url, tag_rfid')
           .eq('sexe', 'Femelle')
           .eq('user_id', userId)
-          .order('nom');
-      for (var b in r) { b['source'] = 'achete'; toutes.add(b); }
-    } catch (e) { debugPrint('⚠️ Brebis achetées: $e'); }
+          .order('nom')
+          .then((r) {
+            final liste = List<Map<String, dynamic>>.from(r);
+            for (var b in liste) b['source'] = 'achete';
+            return liste;
+          })
+          .catchError((e) {
+            debugPrint('⚠️ Brebis achetées: $e');
+            return <Map<String, dynamic>>[];
+          }),
 
-    // Femelles nées
-    try {
-      final r = await supabase
+      // Femelles nées
+      supabase
           .from('nouveaux_nee')
           .select('id, nom, race, image_url, tag_rfid')
           .eq('sexe', 'Femelle')
           .eq('user_id', userId)
-          .order('nom');
-      for (var b in r) { b['source'] = 'nee'; toutes.add(b); }
-    } catch (e) { debugPrint('⚠️ Brebis nées: $e'); }
+          .order('nom')
+          .then((r) {
+            final liste = List<Map<String, dynamic>>.from(r);
+            for (var b in liste) b['source'] = 'nee';
+            return liste;
+          })
+          .catchError((e) {
+            debugPrint('⚠️ Brebis nées: $e');
+            return <Map<String, dynamic>>[];
+          }),
+    ]);
 
-    // Filtrer celles déjà en gestation (date_mise_bas null)
-    final List<Map<String, dynamic>> disponibles = [];
-    for (var brebis in toutes) {
-      try {
-        final acc = await supabase
-            .from('accouplements')
-            .select('id')
-            .eq('brebis_id', brebis['id'])
-            .eq('source_brebis', brebis['source'])
-            .isFilter('date_mise_bas', null)
-            .limit(1)
-            .maybeSingle();
-        if (acc == null) disponibles.add(brebis);
-      } catch (_) {
-        disponibles.add(brebis);
-      }
+    toutes = [...results[0], ...results[1]];
+    debugPrint('📋 Total femelles chargées: ${toutes.length}');
+
+    if (toutes.isEmpty) return [];
+
+    // ── Étape 2 : UNE seule requête pour toutes les gestantes ──
+    // On récupère tous les accouplements sans date_mise_bas
+    // appartenant à cet éleveur — une seule fois pour tout le troupeau.
+    Set<String> gestantesKeys = {};
+    try {
+      final accouplements = await supabase
+          .from('accouplements')
+          .select('brebis_id, source_brebis')
+          .eq('user_id', userId)
+          .isFilter('date_mise_bas', null);
+
+      // ── Étape 3 : construire un Set de clés uniques ──
+      // Clé composite : "source__id" → exemple "achete__42" ou "nee__uuid"
+      // Utiliser __ comme séparateur pour éviter toute collision
+      // (un id ne peut pas contenir "__")
+      gestantesKeys = {
+        for (final acc in accouplements)
+          '${acc['source_brebis']}__${acc['brebis_id']}'
+      };
+
+      debugPrint('🤰 Brebis gestantes détectées: ${gestantesKeys.length}');
+    } catch (e) {
+      // Si la requête échoue (table manquante, erreur réseau),
+      // on retourne toutes les brebis sans filtrage plutôt que bloquer.
+      debugPrint('⚠️ Impossible de charger les gestantes: $e — toutes incluses');
+      return toutes;
     }
+
+    // ── Étape 4 : filtrage en mémoire O(1) par brebis ──
+    // Set.contains() est O(1) — aucune requête réseau supplémentaire.
+    final disponibles = toutes
+        .where((b) => !gestantesKeys.contains(
+              '${b['source']}__${b['id']}',
+            ))
+        .toList();
+
+    debugPrint(
+      '✅ Brebis disponibles: ${disponibles.length} '
+      '(${toutes.length - disponibles.length} gestantes exclues)',
+    );
+
     return disponibles;
   }
 
+  // ── Chargement béliers — parallèle avec Future.wait ──────
   Future<List<Map<String, dynamic>>> _chargerBeliers(String userId) async {
-    List<Map<String, dynamic>> tous = [];
-
-    try {
-      final r = await supabase
+    final results = await Future.wait([
+      supabase
           .from('animal_acheter')
           .select('id, nom, race, tag_rfid, image_url')
           .eq('sexe', 'Mâle')
           .eq('user_id', userId)
-          .order('nom');
-      for (var b in r) { b['source'] = 'achete'; tous.add(b); }
-    } catch (e) { debugPrint('⚠️ Béliers achetés: $e'); }
+          .order('nom')
+          .then((r) {
+            final liste = List<Map<String, dynamic>>.from(r);
+            for (var b in liste) b['source'] = 'achete';
+            return liste;
+          })
+          .catchError((e) {
+            debugPrint('⚠️ Béliers achetés: $e');
+            return <Map<String, dynamic>>[];
+          }),
 
-    try {
-      final r = await supabase
+      supabase
           .from('nouveaux_nee')
           .select('id, nom, race, tag_rfid, image_url')
           .eq('sexe', 'Mâle')
           .eq('user_id', userId)
-          .order('nom');
-      for (var b in r) { b['source'] = 'nee'; tous.add(b); }
-    } catch (e) { debugPrint('⚠️ Béliers nés: $e'); }
+          .order('nom')
+          .then((r) {
+            final liste = List<Map<String, dynamic>>.from(r);
+            for (var b in liste) b['source'] = 'nee';
+            return liste;
+          })
+          .catchError((e) {
+            debugPrint('⚠️ Béliers nés: $e');
+            return <Map<String, dynamic>>[];
+          }),
+    ]);
 
+    final tous = [...results[0], ...results[1]];
+    debugPrint('🐏 Total béliers chargés: ${tous.length}');
     return tous;
   }
 
@@ -357,19 +441,27 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
 
       debugPrint('✅ Accouplement enregistré: ${result['id']}');
 
-      // Programmer rappels agnelage (J-30, J-7, J-1)
+      // ★ Annuler alerte dernière chance — accouplement enregistré !
+      await _notificationService.annulerAlerteDerniereChance(
+        brebisId: _brebisSelectionnee!['id'],
+        source  : _brebisSelectionnee!['source'],
+      );
+
+      // ★ Annuler TOUS les anciens rappels (chaleur + ancien cycle agnelage)
+      //   AVANT de planifier les nouveaux — sinon les IDs seraient supprimés
+      //   du registre juste après avoir été créés (Bug #1 corrigé).
+      await _notificationService.annulerRappelsBrebis(
+        brebisId: _brebisSelectionnee!['id'],
+        source  : _brebisSelectionnee!['source'],
+      );
+
+      // ★ Programmer les nouveaux rappels agnelage (J-30, J-7, J-1)
       await _notificationService.planifierRappelsAgnelage(
         brebisId          : _brebisSelectionnee!['id'],
         nomBrebis         : _brebisSelectionnee!['nom'],
         datePrevueAgnelage: fourchette['prevue']!,
         source            : _brebisSelectionnee!['source'],
         accouplementId    : result['id'],
-      );
-
-      // Annuler rappels chaleur de cette brebis
-      await _notificationService.annulerRappelsBrebis(
-        brebisId: _brebisSelectionnee!['id'],
-        source  : _brebisSelectionnee!['source'],
       );
 
       if (mounted) {

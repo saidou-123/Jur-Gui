@@ -1,9 +1,8 @@
 // ============================================================
-// NOTIFICATION SERVICE - VERSION CORRIGÉE
-// Fichier: lib/Eleveures/New/Notification/NotificationService.dart
-// Corrections:
-//   ✅ Bug hashCode remplacé par NotificationIdManager (IDs uniques garantis)
-//   ✅ _generateNotificationId utilise maintenant le registre centralisé
+// NOTIFICATION SERVICE — VERSION PROFESSIONNELLE
+// ✅ Notifications locales → programmées sur l'appareil (inchangé)
+// ✅ Notifications push → programmées en BD (pas immédiates)
+//    pg_cron envoie au bon moment via process-scheduled-notifications
 // ============================================================
 
 import 'dart:io';
@@ -24,13 +23,14 @@ class NotificationService {
 
   final supabase = Supabase.instance.client;
 
-  // ✅ NavigatorKey pour navigation depuis notifications
   final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-  // ✅ CORRECTION: Utiliser le gestionnaire d'IDs centralisé
   final _idManager = NotificationIdManager();
 
-  // ===== INITIALISATION =====
+  // ============================================================
+  // INITIALISATION
+  // ============================================================
+
   Future<void> initialize() async {
     const androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -40,13 +40,8 @@ class NotificationService {
       requestSoundPermission: true,
     );
 
-    const settings = InitializationSettings(
-      android: androidSettings,
-      iOS: iosSettings,
-    );
-
     await _notifications.initialize(
-      settings,
+      InitializationSettings(android: androidSettings, iOS: iosSettings),
       onDidReceiveNotificationResponse: _onNotificationTap,
     );
 
@@ -76,69 +71,332 @@ class NotificationService {
         ?.createNotificationChannel(androidChannel);
 
     await _checkAndRequestExactAlarmPermission();
-
     debugPrint("✅ NotificationService initialisé");
   }
 
   Future<void> _checkAndRequestExactAlarmPermission() async {
     if (!Platform.isAndroid) return;
-
     try {
       final androidPlugin = _notifications
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>();
-
       if (androidPlugin == null) return;
-
       final canSchedule = await androidPlugin.canScheduleExactNotifications();
-
-      if (canSchedule == false) {
-        debugPrint("⚠️ Permission SCHEDULE_EXACT_ALARM non accordée");
-      } else {
-        debugPrint("✅ Permission alarmes exactes accordée");
-      }
+      debugPrint(canSchedule == false
+          ? "⚠️ Permission SCHEDULE_EXACT_ALARM non accordée"
+          : "✅ Permission alarmes exactes accordée");
     } catch (e) {
       debugPrint("⚠️ Impossible de vérifier permission alarme: $e");
     }
   }
 
-  // ===== GESTION DES TAPS =====
+  // ============================================================
+  // GESTION DES TAPS
+  // ============================================================
+
   void _onNotificationTap(NotificationResponse response) {
     if (response.payload == null || response.payload!.isEmpty) return;
-
-    debugPrint("📲 Notification tapped: ${response.payload}");
-
-    try {
-      final parts = response.payload!.split(':');
-      if (parts.isEmpty) return;
-
-      final type = parts[0];
-
-      switch (type) {
-        case 'chaleur_rappel':
-        case 'fenetre_fertile':
-          navigatorKey.currentState?.pushNamed('/chaleur');
-          break;
-
-        case 'agnelage':
-          if (parts.length >= 4) {
-            navigatorKey.currentState?.pushNamed(
-              '/accouplements',
+    final parts = response.payload!.split(':');
+    if (parts.isEmpty) return;
+    switch (parts[0]) {
+      case 'chaleur_rappel':
+      case 'fenetre_fertile':
+      case 'preparation_accouplement':
+      case 'derniere_chance':
+      case 'cycle_suivant':
+        navigatorKey.currentState?.pushNamed('/chaleur');
+        break;
+      case 'agnelage':
+        if (parts.length >= 4) {
+          navigatorKey.currentState?.pushNamed('/accouplements',
               arguments: {
                 'source': parts[1],
                 'brebis_id': parts[2],
                 'accouplement_id': parts[3],
-              },
-            );
-          }
-          break;
-      }
-    } catch (e) {
-      debugPrint("❌ Erreur navigation notification: $e");
+              });
+        }
+        break;
     }
   }
 
-  // ===== NOTIFICATIONS CHALEURS =====
+  // ============================================================
+  // TOKEN FCM
+  // ============================================================
+
+  Future<void> saveFcmToken(String fcmToken) async {
+    try {
+      final userId = supabase.auth.currentUser?.id;
+      if (userId == null) return;
+      await supabase.from('user_fcm_tokens').upsert(
+        {
+          'user_id': userId,
+          'fcm_token': fcmToken,
+          'platform': Platform.isAndroid ? 'android' : 'ios',
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+        onConflict: 'user_id',
+      );
+      debugPrint('✅ FCM token sauvegardé pour $userId');
+    } catch (e) {
+      debugPrint('❌ Erreur saveFcmToken: $e');
+    }
+  }
+
+  // ============================================================
+  // PUSH IMMÉDIAT (foreground uniquement — ex: confirmation)
+  // ============================================================
+
+  Future<void> afficherNotificationImmediateLocal({
+    required String titre,
+    required String corps,
+    required String type,
+  }) async {
+    try {
+      await _notifications.show(
+        DateTime.now().millisecondsSinceEpoch % 100000,
+        titre, corps,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'reproduction_channel', 'Notifications Reproduction',
+            channelDescription: 'Notifications pour le suivi de la reproduction',
+            importance: Importance.max, priority: Priority.high,
+            icon: '@mipmap/ic_launcher',
+            playSound: true, enableVibration: true,
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: true, presentBadge: true, presentSound: true,
+          ),
+        ),
+        payload: type,
+      );
+      debugPrint('✅ Notification immédiate affichée: $titre');
+    } catch (e) {
+      debugPrint('❌ Erreur notification immédiate: $e');
+    }
+  }
+
+  // ============================================================
+  // ★ PROGRAMMATION PUSH DISTANT (via BD — professionnel)
+  // ============================================================
+
+  /// Programme un push distant dans la BD.
+  /// pg_cron l'enverra exactement à date_envoi.
+  Future<void> _programmerPushDistant({
+    required String type,
+    required String titre,
+    required String corps,
+    required String animalId,
+    required String source,
+    required String nomAnimal,
+    required DateTime dateEnvoi,
+    Map<String, dynamic>? metadata,
+  }) async {
+    try {
+      final userId = supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      // Ne pas programmer si la date est dans le passé
+      if (dateEnvoi.isBefore(DateTime.now())) {
+        debugPrint('⚠️ Date passée, push ignoré: $type à $dateEnvoi');
+        return;
+      }
+
+      await supabase.from('notifications_programmees').insert({
+        'user_id'   : userId,
+        'animal_id' : animalId.toString(),
+        'source'    : source,
+        'nom_animal': nomAnimal,
+        'type'      : type,
+        'titre'     : titre,
+        'corps'     : corps,
+        'date_envoi': dateEnvoi.toIso8601String(),
+        'statut'    : 'planifie',
+        'metadata'  : metadata,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      debugPrint('📅 Push programmé: $type → ${_formatDate(dateEnvoi)}');
+    } catch (e) {
+      debugPrint('❌ Erreur programmation push: $e');
+    }
+  }
+
+  // ============================================================
+  // ★ N1 — PRÉPARATION ACCOUPLEMENT
+  // Immédiat : notification locale de confirmation
+  // H+6 : push programmé en BD (rappel milieu fenêtre)
+  // ============================================================
+
+  Future<void> planifierAlertPreparationAccouplement({
+    required dynamic brebisId,
+    required String nomBrebis,
+    required DateTime dateChaleur,
+    required String source,
+  }) async {
+    try {
+      // 1. Notification locale immédiate (confirmation visuelle)
+      await afficherNotificationImmediateLocal(
+        titre: '🐑 Fenêtre d\'accouplement ouverte !',
+        corps: '$nomBrebis est en chaleur. Préparez l\'accouplement maintenant.',
+        type: 'preparation_accouplement',
+      );
+
+      // 2. Notification locale à H+6 (rappel milieu fenêtre)
+      final rappelH6 = dateChaleur.add(const Duration(hours: 6));
+      if (rappelH6.isAfter(DateTime.now())) {
+        await _scheduleNotification(
+          id: await _idManager.getOrCreate('prep_accouplement_h6', brebisId),
+          title: '🎯 $nomBrebis — Fenêtre fertile active',
+          body: 'La fenêtre d\'accouplement est ouverte depuis 6h. N\'attendez pas !',
+          scheduledDate: rappelH6,
+          payload: 'preparation_accouplement:$source:$brebisId',
+        );
+      }
+
+      // 3. Push distant à H+6 (si app fermée)
+      await _programmerPushDistant(
+        type      : 'preparation_accouplement_h6',
+        titre     : '🎯 $nomBrebis — Rappel accouplement',
+        corps     : 'La fenêtre fertile de $nomBrebis est ouverte depuis 6h. C\'est le moment optimal !',
+        animalId  : brebisId.toString(),
+        source    : source,
+        nomAnimal : nomBrebis,
+        dateEnvoi : rappelH6,
+        metadata  : {'brebis_id': brebisId.toString()},
+      );
+
+      debugPrint('✅ N1 planifiée pour $nomBrebis');
+    } catch (e) {
+      debugPrint('❌ Erreur N1: $e');
+    }
+  }
+
+  // ============================================================
+  // ★ N2 — ALERTE J+15 SANS GESTATION
+  // Push programmé à J+15 exact
+  // ============================================================
+
+  Future<void> planifierAlertJ15SansGestation({
+    required dynamic brebisId,
+    required String nomBrebis,
+    required DateTime dateChaleur,
+    required String source,
+    required DateTime prochaineChaleeurPrevue,
+  }) async {
+    try {
+      final dateJ15 = dateChaleur.add(const Duration(days: 15));
+
+      // Notification locale à J+15
+      await _scheduleNotification(
+        id: await _idManager.getOrCreate('j15_sans_gestation', brebisId),
+        title: '📅 $nomBrebis — Suivi J+15',
+        body: 'Aucune gestation confirmée. Prochain cycle prévu le '
+            '${_formatDate(prochaineChaleeurPrevue)}.',
+        scheduledDate: dateJ15,
+        payload: 'cycle_suivant:$source:$brebisId',
+      );
+
+      // Push distant à J+15 exact (via BD)
+      await _programmerPushDistant(
+        type      : 'j15_sans_gestation',
+        titre     : '📅 $nomBrebis — Pas de gestation à J+15',
+        corps     : 'Prochain cycle prévu le ${_formatDate(prochaineChaleeurPrevue)}. '
+                    'Préparez l\'accouplement à l\'avance !',
+        animalId  : brebisId.toString(),
+        source    : source,
+        nomAnimal : nomBrebis,
+        dateEnvoi : dateJ15,
+        metadata  : {
+          'brebis_id'       : brebisId.toString(),
+          'prochaine_chaleur': prochaineChaleeurPrevue.toIso8601String(),
+        },
+      );
+
+      debugPrint('✅ N2 planifiée à J+15 pour $nomBrebis (${_formatDate(dateJ15)})');
+    } catch (e) {
+      debugPrint('❌ Erreur N2: $e');
+    }
+  }
+
+  // ============================================================
+  // ★ N3 — DERNIÈRE CHANCE À H+20
+  // Push programmé à H+20 exact
+  // ============================================================
+
+  Future<void> planifierAlerteDerniereChance({
+    required dynamic brebisId,
+    required String nomBrebis,
+    required DateTime dateChaleur,
+    required String source,
+  }) async {
+    try {
+      final dateH20 = dateChaleur.add(const Duration(hours: 20));
+
+      // Notification locale à H+20
+      await _scheduleNotification(
+        id: await _idManager.getOrCreate('derniere_chance_h20', brebisId),
+        title: '🚨 DERNIÈRE CHANCE — $nomBrebis',
+        body: 'La fenêtre fertile ferme dans 4h ! Si aucun accouplement '
+              'n\'a été fait, c\'est maintenant ou jamais.',
+        scheduledDate: dateH20,
+        payload: 'derniere_chance:$source:$brebisId',
+      );
+
+      // Push distant à H+20 exact (via BD)
+      await _programmerPushDistant(
+        type      : 'derniere_chance',
+        titre     : '🚨 URGENT — Dernière chance $nomBrebis',
+        corps     : 'Fenêtre fertile ferme dans 4h ! Aucun accouplement enregistré.',
+        animalId  : brebisId.toString(),
+        source    : source,
+        nomAnimal : nomBrebis,
+        dateEnvoi : dateH20,
+        metadata  : {
+          'brebis_id': brebisId.toString(),
+          'fermeture': dateChaleur.add(const Duration(hours: 24)).toIso8601String(),
+        },
+      );
+
+      debugPrint('✅ N3 planifiée à H+20 pour $nomBrebis (${_formatDate(dateH20)})');
+    } catch (e) {
+      debugPrint('❌ Erreur N3: $e');
+    }
+  }
+
+  // ============================================================
+  // ANNULER N3 SI ACCOUPLEMENT ENREGISTRÉ
+  // ============================================================
+
+  Future<void> annulerAlerteDerniereChance({
+    required dynamic brebisId,
+    required String source,
+  }) async {
+    try {
+      final userId = supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      // Annuler notification locale
+      final id = await _idManager.getOrCreate('derniere_chance_h20', brebisId);
+      await _notifications.cancel(id);
+      await _idManager.remove('derniere_chance_h20', brebisId);
+
+      // Annuler push distant en BD
+      await supabase.from('notifications_programmees')
+          .update({'statut': 'annule'})
+          .eq('user_id', userId)
+          .eq('animal_id', brebisId.toString())
+          .eq('type', 'derniere_chance')
+          .eq('statut', 'planifie');
+
+      debugPrint('✅ Alerte dernière chance annulée — accouplement enregistré');
+    } catch (e) {
+      debugPrint('❌ Erreur annulation N3: $e');
+    }
+  }
+
+  // ============================================================
+  // NOTIFICATIONS CHALEURS EXISTANTES
+  // ============================================================
 
   Future<void> planifierRappelProchaineChaleur({
     required dynamic brebisId,
@@ -150,28 +408,33 @@ class NotificationService {
       final dateRappel = datePrevue.subtract(
         Duration(days: ReproductionConfig.rappelAvantChaleurJours),
       );
-
       if (dateRappel.isAfter(DateTime.now())) {
         await _scheduleNotification(
-          // ✅ CORRECTION: ID unique via le gestionnaire centralisé
-          id: _idManager.getOrCreate('chaleur_rappel', brebisId),
+          id: await _idManager.getOrCreate('chaleur_rappel', brebisId),
           title: '🔔 Chaleur prévue bientôt',
-          body:
-              '$nomBrebis devrait entrer en chaleur dans ${ReproductionConfig.rappelAvantChaleurJours} jours',
+          body: '$nomBrebis devrait entrer en chaleur dans '
+              '${ReproductionConfig.rappelAvantChaleurJours} jours',
           scheduledDate: dateRappel,
           payload: 'chaleur_rappel:$source:$brebisId',
         );
-
         await _enregistrerRappelBD(
-          type: 'chaleur_prevue',
-          animalId: brebisId,
-          source: source,
+          type: 'chaleur_prevue', animalId: brebisId, source: source,
           dateRappel: dateRappel,
-          message: 'Rappel prochaine chaleur',
+          message: 'Rappel prochaine chaleur de $nomBrebis',
+        );
+        // Push distant programmé
+        await _programmerPushDistant(
+          type: 'chaleur_prevue',
+          titre: '🔔 Chaleur prévue bientôt',
+          corps: '$nomBrebis devrait entrer en chaleur dans '
+              '${ReproductionConfig.rappelAvantChaleurJours} jours',
+          animalId: brebisId.toString(), source: source, nomAnimal: nomBrebis,
+          dateEnvoi: dateRappel,
+          metadata: {'brebis_id': brebisId.toString()},
         );
       }
     } catch (e) {
-      debugPrint('❌ Erreur planification rappel chaleur: $e');
+      debugPrint('❌ Erreur rappel chaleur: $e');
     }
   }
 
@@ -185,36 +448,31 @@ class NotificationService {
       final debutFenetre = dateChaleur.add(
         Duration(hours: ReproductionConfig.debutFenetileHeures),
       );
-
       final dateRappel = debutFenetre.subtract(
         Duration(hours: ReproductionConfig.rappelFenetileFertileHeures),
       );
-
       if (dateRappel.isAfter(DateTime.now())) {
         await _scheduleNotification(
-          // ✅ CORRECTION: ID unique via le gestionnaire centralisé
-          id: _idManager.getOrCreate('fenetre_fertile', brebisId),
+          id: await _idManager.getOrCreate('fenetre_fertile', brebisId),
           title: '🎯 Fenêtre d\'accouplement optimale',
-          body:
-              '$nomBrebis entre dans sa fenêtre fertile dans ${ReproductionConfig.rappelFenetileFertileHeures}h',
+          body: '$nomBrebis entre dans sa fenêtre fertile dans '
+              '${ReproductionConfig.rappelFenetileFertileHeures}h',
           scheduledDate: dateRappel,
           payload: 'fenetre_fertile:$source:$brebisId',
         );
-
         await _enregistrerRappelBD(
-          type: 'fenetre_fertile',
-          animalId: brebisId,
-          source: source,
-          dateRappel: dateRappel,
-          message: 'Début fenêtre fertile',
+          type: 'fenetre_fertile', animalId: brebisId, source: source,
+          dateRappel: dateRappel, message: 'Début fenêtre fertile de $nomBrebis',
         );
       }
     } catch (e) {
-      debugPrint('❌ Erreur planification fenêtre fertile: $e');
+      debugPrint('❌ Erreur fenêtre fertile: $e');
     }
   }
 
-  // ===== NOTIFICATIONS AGNELAGE =====
+  // ============================================================
+  // NOTIFICATIONS AGNELAGE
+  // ============================================================
 
   Future<void> planifierRappelsAgnelage({
     required dynamic brebisId,
@@ -224,172 +482,164 @@ class NotificationService {
     required dynamic accouplementId,
   }) async {
     try {
-      await _planifierRappelAgnelage(
-        brebisId: brebisId,
-        nomBrebis: nomBrebis,
-        datePrevue: datePrevueAgnelage,
-        source: source,
-        accouplementId: accouplementId,
-        joursAvant: ReproductionConfig.rappel1MoisAvantJours,
-        titre: '📅 Agnelage dans 1 mois',
-        corps:
-            '$nomBrebis devrait agneler dans environ 30 jours. Préparez le matériel.',
-      );
+      final rappels = [
+        (ReproductionConfig.rappel1MoisAvantJours, '📅 Agnelage dans 1 mois',
+         '$nomBrebis devrait agneler dans environ 30 jours. Préparez le matériel.'),
+        (ReproductionConfig.rappel1SemaineAvantJours, '⚠️ Agnelage dans 1 semaine',
+         '$nomBrebis devrait agneler dans 7 jours. Surveillance accrue recommandée.'),
+        (ReproductionConfig.rappel24hAvantJours, '🚨 Agnelage imminent',
+         '$nomBrebis devrait agneler dans les prochaines 24h. Surveillez-la de près.'),
+      ];
 
-      await _planifierRappelAgnelage(
-        brebisId: brebisId,
-        nomBrebis: nomBrebis,
-        datePrevue: datePrevueAgnelage,
-        source: source,
-        accouplementId: accouplementId,
-        joursAvant: ReproductionConfig.rappel1SemaineAvantJours,
-        titre: '⚠️ Agnelage dans 1 semaine',
-        corps:
-            '$nomBrebis devrait agneler dans 7 jours. Surveillance accrue recommandée.',
-      );
-
-      await _planifierRappelAgnelage(
-        brebisId: brebisId,
-        nomBrebis: nomBrebis,
-        datePrevue: datePrevueAgnelage,
-        source: source,
-        accouplementId: accouplementId,
-        joursAvant: ReproductionConfig.rappel24hAvantJours,
-        titre: '🚨 Agnelage imminent',
-        corps:
-            '$nomBrebis devrait agneler dans les prochaines 24h. Surveillez-la de près.',
-      );
-
-      debugPrint("✅ 3 rappels agnelage planifiés pour $nomBrebis");
+      for (final (jours, titre, corps) in rappels) {
+        final dateRappel = datePrevueAgnelage.subtract(Duration(days: jours));
+        if (dateRappel.isAfter(DateTime.now())) {
+          // Notification locale
+          await _scheduleNotification(
+            id: await _idManager.getOrCreate('agnelage_${jours}j', brebisId),
+            title: titre, body: corps, scheduledDate: dateRappel,
+            payload: 'agnelage:$source:$brebisId:$accouplementId',
+          );
+          await _enregistrerRappelBD(
+            type: 'agnelage_${jours}j', animalId: brebisId,
+            source: source, dateRappel: dateRappel, message: corps,
+            metadata: {'accouplement_id': accouplementId.toString()},
+          );
+          // Push distant programmé à la bonne date
+          await _programmerPushDistant(
+            type: 'agnelage_${jours}j',
+            titre: titre, corps: corps,
+            animalId: brebisId.toString(), source: source, nomAnimal: nomBrebis,
+            dateEnvoi: dateRappel,
+            metadata: {
+              'brebis_id': brebisId.toString(),
+              'accouplement_id': accouplementId.toString(),
+            },
+          );
+        }
+      }
+      debugPrint("✅ Rappels agnelage planifiés pour $nomBrebis");
     } catch (e) {
-      debugPrint('❌ Erreur planification rappels agnelage: $e');
+      debugPrint('❌ Erreur agnelage: $e');
     }
   }
 
-  Future<void> _planifierRappelAgnelage({
-    required dynamic brebisId,
-    required String nomBrebis,
-    required DateTime datePrevue,
-    required String source,
-    required dynamic accouplementId,
-    required int joursAvant,
-    required String titre,
-    required String corps,
+  // ============================================================
+  // PUSH VÉTÉRINAIRE (immédiat — urgent)
+  // ============================================================
+
+  Future<void> notifierVeterinaire({
+    required String veterinaireId, required String nomBrebis,
+    required String message, required String animalId, required String source,
   }) async {
-    final dateRappel = datePrevue.subtract(Duration(days: joursAvant));
-
-    if (dateRappel.isAfter(DateTime.now())) {
-      await _scheduleNotification(
-        // ✅ CORRECTION: préfixe unique par durée → IDs distincts pour les 3 rappels
-        id: _idManager.getOrCreate('agnelage_${joursAvant}j', brebisId),
-        title: titre,
-        body: corps,
-        scheduledDate: dateRappel,
-        payload: 'agnelage:$source:$brebisId:$accouplementId',
-      );
-
-      await _enregistrerRappelBD(
-        type: 'agnelage_${joursAvant}j',
-        animalId: brebisId,
-        source: source,
-        dateRappel: dateRappel,
-        message: corps,
-        metadata: {'accouplement_id': accouplementId.toString()},
-      );
+    // Les alertes vétérinaires sont toujours immédiates
+    try {
+      await supabase.functions.invoke('send-push-notification', body: {
+        'user_id': veterinaireId,
+        'title': '🚨 Anomalie signalée',
+        'body': '$nomBrebis — $message',
+        'type': 'alerte_eleveur',
+        'data': {'animal_id': animalId, 'source': source},
+      });
+      debugPrint('✅ Vétérinaire notifié immédiatement pour $nomBrebis');
+    } catch (e) {
+      debugPrint('❌ Erreur notification vétérinaire: $e');
     }
   }
 
-  // ===== ANNULATION =====
-
-  Future<void> annulerRappelsBrebis({
-    required dynamic brebisId,
-    required String source,
+  Future<void> notifierEleveurConsultation({
+    required String eleveurId, required String nomBrebis,
+    required String diagnostic, required String animalId, required String source,
   }) async {
     try {
-      // ✅ CORRECTION: On récupère les vrais IDs depuis le registre
-      final ids = [
+      await supabase.functions.invoke('send-push-notification', body: {
+        'user_id': eleveurId,
+        'title': '✅ Consultation validée',
+        'body': '$nomBrebis — $diagnostic',
+        'type': 'consultation_validee',
+        'data': {'animal_id': animalId, 'source': source},
+      });
+      debugPrint('✅ Éleveur notifié immédiatement pour $nomBrebis');
+    } catch (e) {
+      debugPrint('❌ Erreur notification éleveur: $e');
+    }
+  }
+
+  // ============================================================
+  // ANNULATION GÉNÉRALE
+  // ============================================================
+
+  Future<void> annulerRappelsBrebis({
+    required dynamic brebisId, required String source,
+  }) async {
+    try {
+      final userId = supabase.auth.currentUser?.id;
+
+      final ids = await Future.wait([
         _idManager.getOrCreate('chaleur_rappel', brebisId),
         _idManager.getOrCreate('fenetre_fertile', brebisId),
+        _idManager.getOrCreate('prep_accouplement_h6', brebisId),
+        _idManager.getOrCreate('j15_sans_gestation', brebisId),
+        _idManager.getOrCreate('derniere_chance_h20', brebisId),
         _idManager.getOrCreate('agnelage_30j', brebisId),
         _idManager.getOrCreate('agnelage_7j', brebisId),
         _idManager.getOrCreate('agnelage_1j', brebisId),
-      ];
+      ]);
+      for (var id in ids) { await _notifications.cancel(id); }
 
-      for (var id in ids) {
-        await _notifications.cancel(id);
-      }
+      for (final prefix in [
+        'chaleur_rappel', 'fenetre_fertile', 'prep_accouplement_h6',
+        'j15_sans_gestation', 'derniere_chance_h20',
+        'agnelage_30j', 'agnelage_7j', 'agnelage_1j',
+      ]) { await _idManager.remove(prefix, brebisId); }
 
-      // Nettoyer le registre
-      _idManager.remove('chaleur_rappel', brebisId);
-      _idManager.remove('fenetre_fertile', brebisId);
-      _idManager.remove('agnelage_30j', brebisId);
-      _idManager.remove('agnelage_7j', brebisId);
-      _idManager.remove('agnelage_1j', brebisId);
+      await supabase.from('rappels_reproduction').update({
+        'statut': 'annule',
+        'date_annulation': DateTime.now().toIso8601String(),
+      }).eq('animal_id', brebisId.toString())
+        .eq('source', source).eq('statut', 'planifie');
 
-      await supabase
-          .from('rappels_reproduction')
-          .update({
-            'statut': 'annule',
-            'date_annulation': DateTime.now().toIso8601String(),
-          })
+      // Annuler aussi les push programmés en BD
+      if (userId != null) {
+        await supabase.from('notifications_programmees').update({
+          'statut': 'annule',
+        }).eq('user_id', userId)
           .eq('animal_id', brebisId.toString())
-          .eq('source', source)
           .eq('statut', 'planifie');
+      }
 
       debugPrint('✅ Tous les rappels annulés pour brebis $brebisId');
     } catch (e) {
-      debugPrint('❌ Erreur annulation rappels: $e');
+      debugPrint('❌ Erreur annulation: $e');
     }
   }
 
-  // ===== PLANIFICATION =====
+  // ============================================================
+  // PLANIFICATION LOCALE
+  // ============================================================
 
   Future<void> _scheduleNotification({
-    required int id,
-    required String title,
-    required String body,
-    required DateTime scheduledDate,
-    String? payload,
+    required int id, required String title, required String body,
+    required DateTime scheduledDate, String? payload,
   }) async {
     try {
-      if (scheduledDate.isBefore(DateTime.now())) {
-        debugPrint("⚠️ Date dans le passé, notification ignorée: $scheduledDate");
-        return;
-      }
-
-      if (!tz.timeZoneDatabase.locations.containsKey(tz.local.name)) {
-        throw Exception('Timezone non disponible: ${tz.local.name}');
-      }
-
+      if (scheduledDate.isBefore(DateTime.now())) return;
+      if (!tz.timeZoneDatabase.locations.containsKey(tz.local.name)) return;
       final tzDate = tz.TZDateTime.from(scheduledDate, tz.local);
-
-      if (tzDate.isBefore(tz.TZDateTime.now(tz.local))) {
-        debugPrint("⚠️ Date TZ dans le passé après conversion");
-        return;
-      }
+      if (tzDate.isBefore(tz.TZDateTime.now(tz.local))) return;
 
       await _notifications.zonedSchedule(
-        id,
-        title,
-        body,
-        tzDate,
+        id, title, body, tzDate,
         const NotificationDetails(
           android: AndroidNotificationDetails(
-            'reproduction_channel',
-            'Notifications Reproduction',
-            channelDescription:
-                'Notifications pour le suivi de la reproduction',
-            importance: Importance.high,
-            priority: Priority.high,
+            'reproduction_channel', 'Notifications Reproduction',
+            channelDescription: 'Notifications pour le suivi de la reproduction',
+            importance: Importance.high, priority: Priority.high,
             icon: '@mipmap/ic_launcher',
-            playSound: true,
-            enableVibration: true,
-            enableLights: true,
+            playSound: true, enableVibration: true, enableLights: true,
           ),
           iOS: DarwinNotificationDetails(
-            presentAlert: true,
-            presentBadge: true,
-            presentSound: true,
+            presentAlert: true, presentBadge: true, presentSound: true,
           ),
         ),
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
@@ -397,67 +647,79 @@ class NotificationService {
             UILocalNotificationDateInterpretation.absoluteTime,
         payload: payload,
       );
-
-      debugPrint("✅ Notification planifiée: ID=$id, Date=$scheduledDate");
+      debugPrint("✅ Notification locale planifiée: ID=$id à $scheduledDate");
     } catch (e, stack) {
-      debugPrint("❌ ERREUR planification notification: $e");
-      debugPrint("Stack: $stack");
+      debugPrint("❌ ERREUR planification: $e\n$stack");
     }
   }
 
   Future<void> _enregistrerRappelBD({
-    required String type,
-    required dynamic animalId,
-    required String source,
-    required DateTime dateRappel,
-    required String message,
-    Map<String, dynamic>? metadata,
+    required String type, required dynamic animalId,
+    required String source, required DateTime dateRappel,
+    required String message, Map<String, dynamic>? metadata,
   }) async {
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) return;
-
       await supabase.from('rappels_reproduction').insert({
-        'user_id': userId,
-        'type': type,
-        'animal_id': animalId.toString(),
-        'source': source,
+        'user_id': userId, 'type': type,
+        'animal_id': animalId.toString(), 'source': source,
         'date_rappel': dateRappel.toIso8601String(),
-        'message': message,
-        'statut': 'planifie',
+        'message': message, 'statut': 'planifie',
         'metadata': metadata,
         'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      debugPrint('⚠️ Erreur enregistrement rappel BD (non-bloquant): $e');
+      debugPrint('⚠️ Erreur enregistrement rappel BD: $e');
     }
   }
 
-  // ===== DEBUG =====
+  // ============================================================
+  // DEBUG
+  // ============================================================
 
   Future<void> debugPendingNotifications() async {
     try {
       final pending = await _notifications.pendingNotificationRequests();
-      debugPrint("📋 ${pending.length} notifications en attente:");
-      for (var notif in pending) {
-        debugPrint("  - ID: ${notif.id}, Titre: ${notif.title}");
+      debugPrint("📋 ${pending.length} notifications locales en attente:");
+      for (var n in pending) {
+        debugPrint("  - ID: ${n.id}, Titre: ${n.title}");
+      }
+      final userId = supabase.auth.currentUser?.id;
+      if (userId != null) {
+        final pushProgrammes = await supabase
+            .from('notifications_programmees')
+            .select('type, nom_animal, date_envoi, statut')
+            .eq('user_id', userId)
+            .eq('statut', 'planifie')
+            .order('date_envoi');
+        debugPrint("📋 ${pushProgrammes.length} push distants programmés:");
+        for (var p in pushProgrammes) {
+          debugPrint("  - ${p['type']} → ${p['nom_animal']} le ${p['date_envoi']}");
+        }
       }
     } catch (e) {
-      debugPrint("❌ Erreur récupération notifications: $e");
+      debugPrint("❌ Erreur debug: $e");
     }
   }
 
   Future<void> nettoyerRappelsExpires() async {
     try {
-      await supabase
-          .from('rappels_reproduction')
+      await supabase.from('rappels_reproduction')
           .update({'statut': 'expire'})
           .lt('date_rappel', DateTime.now().toIso8601String())
           .eq('statut', 'planifie');
-
       debugPrint('✅ Rappels expirés nettoyés');
     } catch (e) {
-      debugPrint('❌ Erreur nettoyage rappels: $e');
+      debugPrint('❌ Erreur nettoyage: $e');
     }
   }
+
+  // ============================================================
+  // UTILITAIRES
+  // ============================================================
+
+  String _formatDate(DateTime date) =>
+      '${date.day.toString().padLeft(2, '0')}/'
+      '${date.month.toString().padLeft(2, '0')}/${date.year}';
 }

@@ -1,5 +1,5 @@
 // ============================================================
-// INTERFACE ÉLEVEUR - VERSION PRODUCTION (SANS TESTS)
+// INTERFACE ÉLEVEUR - VERSION PRODUCTION AVEC BOTTOM NAV BAR
 // Fichier: lib/pages/Interface/interfaceEleveur.dart
 // ============================================================
 
@@ -10,6 +10,8 @@ import 'package:depart/Eleveures/New/Accouplemt/ConsanguiniteService.dart';
 import 'package:depart/Eleveures/New/Notification/NotificationsViewPage.dart';
 import 'package:depart/Eleveures/New/chaleur/ChaleurModule.dart';
 import 'package:depart/Eleveures/New/genealogique/ArbreGenealogique.dart';
+// ✅ NOUVEAU — Import Copilot
+import 'package:depart/Eleveures/New/Copilot/CopilotPage.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:depart/Eleveures/Mon%20Troupeau/Mon_Troupeau.dart';
@@ -30,11 +32,11 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     with SingleTickerProviderStateMixin {
   final _supabase = Supabase.instance.client;
   final _cache = CacheManager();
-  
+
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
-  
+
   // État
   int _totalAnimaux = 0;
   int _nombreMales = 0;
@@ -42,6 +44,9 @@ class _interfaceElevaureState extends State<interfaceElevaur>
   bool _isLoading = true;
   String _userEmail = "";
   String _userName = "";
+
+  // BottomNav
+  int _selectedIndex = 0;
 
   @override
   void initState() {
@@ -71,7 +76,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
       begin: const Offset(0, 0.15),
       end: Offset.zero,
     ).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeOutCubic),
+      CurvedAnimation(
+          parent: _animationController, curve: Curves.easeOutCubic),
     );
 
     _animationController.forward();
@@ -89,15 +95,14 @@ class _interfaceElevaureState extends State<interfaceElevaur>
   Future<void> _chargerInfoUtilisateur() async {
     try {
       final user = _supabase.auth.currentUser;
-      
+
       if (user != null && mounted) {
-        // Essayer de récupérer depuis la table users
         final userData = await _supabase
             .from('users')
             .select('nom, prenom, nom_complet')
             .eq('id', user.id)
             .maybeSingle();
-        
+
         String name;
         if (userData != null && userData['nom_complet'] != null) {
           name = userData['nom_complet'];
@@ -106,12 +111,12 @@ class _interfaceElevaureState extends State<interfaceElevaur>
         } else {
           name = user.email?.split('@').first.toUpperCase() ?? "Éleveur";
         }
-        
+
         setState(() {
           _userEmail = user.email ?? "Non disponible";
           _userName = name;
         });
-        
+
         debugPrint("✅ Utilisateur chargé: $name");
       }
     } catch (e) {
@@ -126,14 +131,13 @@ class _interfaceElevaureState extends State<interfaceElevaur>
   // ===== CHARGER STATISTIQUES AVEC CACHE =====
   Future<void> _chargerStatistiques() async {
     if (!mounted) return;
-    
+
     setState(() => _isLoading = true);
-    
+
     try {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) throw Exception("Utilisateur non connecté");
 
-      // ✅ Utiliser le cache
       final stats = await _cache.getOrFetch<Map<String, int>>(
         key: CacheKeys.stats(userId),
         fetcher: () => _fetchStatistics(userId),
@@ -149,12 +153,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
         });
       }
     } catch (error, stackTrace) {
-      ErrorHandler.log(
-        error,
-        stackTrace,
-        context: 'Chargement statistiques',
-      );
-      
+      ErrorHandler.log(error, stackTrace, context: 'Chargement statistiques');
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -165,7 +164,6 @@ class _interfaceElevaureState extends State<interfaceElevaur>
   Future<Map<String, int>> _fetchStatistics(String userId) async {
     debugPrint("📊 Chargement statistiques pour: $userId");
 
-    // ✅ Requêtes parallèles
     final results = await Future.wait([
       _supabase
           .from('nouveaux_nee')
@@ -180,7 +178,6 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     int males = 0;
     int femelles = 0;
 
-    // Compter nouveaux-nés
     for (var animal in results[0]) {
       final sexe = animal['sexe']?.toString().toLowerCase() ?? '';
       if (sexe == 'male' || sexe == 'mâle') {
@@ -190,7 +187,6 @@ class _interfaceElevaureState extends State<interfaceElevaur>
       }
     }
 
-    // Compter achetés
     for (var animal in results[1]) {
       final sexe = animal['sexe']?.toString().toLowerCase() ?? '';
       if (sexe == 'male' || sexe == 'mâle') {
@@ -201,20 +197,15 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     }
 
     final total = males + femelles;
-
     debugPrint("✅ Stats: Total=$total, Mâles=$males, Femelles=$femelles");
 
-    return {
-      'total': total,
-      'males': males,
-      'femelles': femelles,
-    };
+    return {'total': total, 'males': males, 'femelles': femelles};
   }
 
   // ===== DÉCONNEXION SÉCURISÉE =====
   Future<void> _handleLogout() async {
     final navigator = Navigator.of(context);
-    
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -241,7 +232,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: Text("Annuler", style: TextStyle(color: Colors.grey[600])),
+            child:
+                Text("Annuler", style: TextStyle(color: Colors.grey[600])),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
@@ -258,15 +250,10 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     if (confirm != true) return;
 
     try {
-      // Vider le cache
       _cache.clear();
-      
-      // Déconnexion
       await _supabase.auth.signOut();
-      
       debugPrint("✅ Déconnexion réussie");
 
-      // Navigation
       navigator.pushReplacement(
         MaterialPageRoute(builder: (_) => const Connexion()),
       );
@@ -280,30 +267,63 @@ class _interfaceElevaureState extends State<interfaceElevaur>
 
   // ===== RAFRAÎCHISSEMENT =====
   Future<void> _handleRefresh() async {
-    // Invalider le cache des stats
     final userId = _supabase.auth.currentUser?.id;
     if (userId != null) {
       _cache.invalidate(CacheKeys.stats(userId));
     }
-    
+
     await _initializeData();
-    
+
     if (mounted) {
       ErrorHandler.showSuccess(context, "Données actualisées");
     }
   }
 
+  // ===== NAVIGATION BOTTOM BAR =====
+  void _onNavTap(int index) {
+    setState(() => _selectedIndex = index);
+
+    switch (index) {
+      case 0:
+        break;
+      case 1:
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const MonTroupeau()),
+        ).then((_) => setState(() => _selectedIndex = 0));
+        break;
+      case 2:
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const AjouterAnimal()),
+        ).then((_) => setState(() => _selectedIndex = 0));
+        break;
+      case 3:
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const NotificationsViewPage()),
+        ).then((_) => setState(() => _selectedIndex = 0));
+        break;
+    }
+  }
+
+  // ===== BUILD PRINCIPAL =====
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: _buildAppBar(),
       drawer: _buildDrawer(),
+
+      // ✅ NOUVEAU — Bouton Copilot IA flottant
+      floatingActionButton: _buildCopilotFAB(),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+
       body: _isLoading
           ? _buildLoadingState()
           : RefreshIndicator(
               onRefresh: _handleRefresh,
-              color: Couleur.premierColor,
+              color: Couleur.PremierColor,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
@@ -323,16 +343,46 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                         _buildSectionHeader(),
                         const SizedBox(height: 12),
                         _buildOptionsGrid(),
-                        const SizedBox(height: 80),
+                        const SizedBox(height: 100), // espace pour le FAB
                       ],
                     ),
                   ),
                 ),
               ),
             ),
+      bottomNavigationBar: _buildBottomNavBar(),
     );
   }
 
+  // ===== COPILOT IA FAB ✅ NOUVEAU =====
+  Widget _buildCopilotFAB() {
+    return FloatingActionButton.extended(
+      heroTag: 'copilot',
+      onPressed: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const CopilotPage()),
+      ),
+      backgroundColor: const Color(0xFF1B5E20),
+      icon: const Icon(
+        Icons.smart_toy_outlined,
+        color: Colors.white,
+      ),
+      label: const Text(
+        'Copilot IA',
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+          fontSize: 14,
+        ),
+      ),
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+    );
+  }
+
+  // ===== APP BAR =====
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       title: const Text(
@@ -341,36 +391,116 @@ class _interfaceElevaureState extends State<interfaceElevaur>
       ),
       centerTitle: true,
       backgroundColor: Colors.white,
-      foregroundColor: Couleur.premierColor,
+      foregroundColor: Couleur.PremierColor,
       elevation: 2,
-      iconTheme: IconThemeData(color: Couleur.premierColor),
+      iconTheme: IconThemeData(color: Couleur.PremierColor),
     );
   }
 
+  // ===== BOTTOM NAVIGATION BAR =====
+  Widget _buildBottomNavBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.10),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        child: BottomNavigationBar(
+          currentIndex: _selectedIndex,
+          onTap: _onNavTap,
+          type: BottomNavigationBarType.fixed,
+          backgroundColor: Colors.white,
+          selectedItemColor: Couleur.PremierColor,
+          unselectedItemColor: Colors.grey[400],
+          selectedLabelStyle: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 11,
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontWeight: FontWeight.w400,
+            fontSize: 11,
+          ),
+          elevation: 0,
+          items: [
+            BottomNavigationBarItem(
+              icon: _navIcon(Icons.home_outlined, 0),
+              activeIcon: _navIconActive(Icons.home_rounded, 0),
+              label: "Accueil",
+            ),
+            BottomNavigationBarItem(
+              icon: _navIcon(Icons.pets_outlined, 1),
+              activeIcon: _navIconActive(Icons.pets, 1),
+              label: "Troupeau",
+            ),
+            BottomNavigationBarItem(
+              icon: _navIcon(Icons.add_circle_outline, 2),
+              activeIcon: _navIconActive(Icons.add_circle, 2),
+              label: "Ajouter",
+            ),
+            BottomNavigationBarItem(
+              icon: _navIcon(Icons.notifications_outlined, 3),
+              activeIcon: _navIconActive(Icons.notifications, 3),
+              label: "Alertes",
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _navIcon(IconData icon, int index) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Icon(icon, size: 24),
+    );
+  }
+
+  Widget _navIconActive(IconData icon, int index) {
+    return Container(
+      margin: const EdgeInsets.only(top: 2, bottom: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: Couleur.PremierColor.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Icon(icon, size: 24, color: Couleur.PremierColor),
+    );
+  }
+
+  // ===== LOADING =====
   Widget _buildLoadingState() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          CircularProgressIndicator(color: Couleur.premierColor),
+          CircularProgressIndicator(color: Couleur.PremierColor),
           const SizedBox(height: 16),
           Text(
             "Chargement...",
-            style: TextStyle(color: Couleur.premierColor, fontSize: 16),
+            style: TextStyle(color: Couleur.PremierColor, fontSize: 16),
           ),
         ],
       ),
     );
   }
 
+  // ===== WELCOME CARD =====
   Widget _buildWelcomeCard() {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Couleur.premierColor,
-            Couleur.premierColor.withOpacity(0.8),
+            Couleur.PremierColor,
+            Couleur.PremierColor.withOpacity(0.8),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -378,7 +508,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Couleur.premierColor.withOpacity(0.3),
+            color: Couleur.PremierColor.withOpacity(0.3),
             blurRadius: 8,
             offset: const Offset(0, 4),
           ),
@@ -415,6 +545,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     );
   }
 
+  // ===== STATISTIQUES =====
   Widget _buildStatistiques() {
     return Row(
       children: [
@@ -498,6 +629,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     );
   }
 
+  // ===== SCAN RFID =====
   Widget _buildScanRFIDCard() {
     return Container(
       height: 200,
@@ -506,14 +638,14 @@ class _interfaceElevaureState extends State<interfaceElevaur>
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Couleur.premierColor,
-            Couleur.premierColor.withOpacity(0.8),
+            Couleur.PremierColor,
+            Couleur.PremierColor.withOpacity(0.8),
           ],
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Couleur.premierColor.withOpacity(0.4),
+            color: Couleur.PremierColor.withOpacity(0.4),
             blurRadius: 12,
             offset: const Offset(0, 6),
           ),
@@ -555,7 +687,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => const AnimalInfoRFIDPageBluetooth(),
+                          builder: (context) =>
+                              const AnimalInfoRFIDPageBluetooth(),
                         ),
                       );
                     },
@@ -566,7 +699,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
-                      foregroundColor: Couleur.premierColor,
+                      foregroundColor: Couleur.PremierColor,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 20,
                         vertical: 15,
@@ -599,6 +732,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     );
   }
 
+  // ===== SECTION HEADER =====
   Widget _buildSectionHeader() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -616,12 +750,13 @@ class _interfaceElevaureState extends State<interfaceElevaur>
           },
           icon: const Icon(Icons.arrow_forward, size: 16),
           label: const Text("Voir tout"),
-          style: TextButton.styleFrom(foregroundColor: Couleur.premierColor),
+          style: TextButton.styleFrom(foregroundColor: Couleur.PremierColor),
         ),
       ],
     );
   }
 
+  // ===== OPTIONS GRID =====
   Widget _buildOptionsGrid() {
     return Column(
       children: [
@@ -662,7 +797,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               child: optioncardEleveur(
                 image: 'assets/image/img14.png',
                 label: 'Ajouter Animal',
-                route: const  AjouterAnimal (),
+                route: const AjouterAnimal(),
                 backgroundColor: const Color(0xFFFFF9C4),
               ),
             ),
@@ -687,6 +822,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     );
   }
 
+  // ===== DRAWER =====
   Widget _buildDrawer() {
     return Drawer(
       child: ListView(
@@ -696,8 +832,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  Couleur.premierColor,
-                  Couleur.premierColor.withOpacity(0.8),
+                  Couleur.PremierColor,
+                  Couleur.PremierColor.withOpacity(0.8),
                 ],
               ),
             ),
@@ -734,23 +870,36 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               _handleRefresh();
             },
           ),
+          const Divider(),
+          // ✅ NOUVEAU — Accès Copilot depuis le Drawer aussi
           ListTile(
-            leading: const Icon(Icons.notifications, color: Colors.blue),
-            title: const Text("Mes Notifications"),
+            leading: const Icon(
+              Icons.smart_toy_outlined,
+              color: Color(0xFF1B5E20),
+            ),
+            title: const Text(
+              "Copilot IA",
+              style: TextStyle(
+                color: Color(0xFF1B5E20),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            subtitle: const Text("Assistant élevage intelligent"),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (context) => const NotificationsViewPage(),
-                ),
+                MaterialPageRoute(builder: (_) => const CopilotPage()),
               );
             },
           ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.red),
-            title: const Text("Déconnexion", style: TextStyle(color: Colors.red)),
+            title: const Text(
+              "Déconnexion",
+              style: TextStyle(color: Colors.red),
+            ),
             onTap: _handleLogout,
           ),
         ],

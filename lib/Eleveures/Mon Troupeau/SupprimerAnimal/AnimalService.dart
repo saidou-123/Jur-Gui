@@ -55,4 +55,6 @@ class AnimalService {
   Future<Map<String, dynamic>?> rechercherEleveur(String email) {
     return _repository.findEleveurByEmail(email);
   }
+
+  Future chargerTousLesAnimaux() async {}
 }

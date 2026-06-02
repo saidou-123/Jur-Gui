@@ -120,9 +120,9 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              Couleur.premierColor,
-              Couleur.deuxiemeColor,
-              Couleur.premierColor.withOpacity(0.8),
+              Couleur.PremierColor,
+              Couleur.DeuxiemeColor,
+              Couleur.PremierColor.withOpacity(0.8),
             ],
           ),
         ),
@@ -315,8 +315,8 @@ class _SplashScreenState extends State<SplashScreen> {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Couleur.premierColor,
-              Couleur.deuxiemeColor,
+              Couleur.PremierColor,
+              Couleur.DeuxiemeColor,
             ],
           ),
         ),

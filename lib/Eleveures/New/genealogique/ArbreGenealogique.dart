@@ -285,7 +285,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
       backgroundColor: Colors.grey[50],
       appBar: _buildAppBar(),
       body: _loadingListe
-          ? Center(child: CircularProgressIndicator(color: Couleur.premierColor))
+          ? Center(child: CircularProgressIndicator(color: Couleur.PremierColor))
           : _animalSelectionne == null
               ? _buildEcranSelection()
               : _buildEcranArbre(),
@@ -301,7 +301,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
       ),
       backgroundColor: Colors.white,
-      foregroundColor: Couleur.premierColor,
+      foregroundColor: Couleur.PremierColor,
       elevation: 2,
       leading: _animalSelectionne != null
           ? IconButton(
@@ -331,7 +331,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
                                 Icons.check,
                                 size: 16,
                                 color: _maxGenerations == g
-                                    ? Couleur.premierColor
+                                    ? Couleur.PremierColor
                                     : Colors.transparent,
                               ),
                               const SizedBox(width: 8),
@@ -359,7 +359,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
             onChanged: (v) => setState(() => _recherche = v),
             decoration: InputDecoration(
               hintText: 'Rechercher un animal...',
-              prefixIcon: Icon(Icons.search, color: Couleur.premierColor),
+              prefixIcon: Icon(Icons.search, color: Couleur.PremierColor),
               suffixIcon: _recherche.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.clear),
@@ -395,7 +395,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
               const Spacer(),
               Text(
                 'Appuyez pour voir l\'arbre',
-                style: TextStyle(color: Couleur.premierColor, fontSize: 13),
+                style: TextStyle(color: Couleur.PremierColor, fontSize: 13),
               ),
             ],
           ),
@@ -477,7 +477,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
             ),
           ],
         ),
-        trailing: Icon(Icons.account_tree, color: Couleur.premierColor),
+        trailing: Icon(Icons.account_tree, color: Couleur.PremierColor),
         onTap: () => _selectionnerAnimal(animal),
       ),
     );
@@ -498,11 +498,11 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      CircularProgressIndicator(color: Couleur.premierColor),
+                      CircularProgressIndicator(color: Couleur.PremierColor),
                       const SizedBox(height: 12),
                       Text(
                         'Construction de l\'arbre...',
-                        style: TextStyle(color: Couleur.premierColor),
+                        style: TextStyle(color: Couleur.PremierColor),
                       ),
                     ],
                   ),
@@ -585,7 +585,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
     return SizedBox(
       width: 140,
       height: 36,
-      child: CustomPaint(painter: _ConnecteurPainter(Couleur.premierColor)),
+      child: CustomPaint(painter: _ConnecteurPainter(Couleur.PremierColor)),
     );
   }
 

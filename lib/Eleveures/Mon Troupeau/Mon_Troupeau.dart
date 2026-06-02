@@ -50,7 +50,7 @@ class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStat
       appBar: _buildAppBar(),
       body: RefreshIndicator(
         onRefresh: _handleRefresh,
-        color: Couleur.premierColor,
+        color: Couleur.PremierColor,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),
@@ -85,9 +85,9 @@ class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStat
       ),
       centerTitle: true,
       backgroundColor: Colors.white,
-      foregroundColor: Couleur.premierColor,
+      foregroundColor: Couleur.PremierColor,
       elevation: 2,
-      iconTheme: IconThemeData(color: Couleur.premierColor),
+      iconTheme: IconThemeData(color: Couleur.PremierColor),
     );
   }
   Widget _buildSectionTitle(String title, IconData icon) {
@@ -96,10 +96,10 @@ class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStat
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Couleur.premierColor.withOpacity(0.1),
+            color: Couleur.PremierColor.withOpacity(0.1),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(icon, color: Couleur.premierColor, size: 20),
+          child: Icon(icon, color: Couleur.PremierColor, size: 20),
         ),
         const SizedBox(width: 12),
         Text(

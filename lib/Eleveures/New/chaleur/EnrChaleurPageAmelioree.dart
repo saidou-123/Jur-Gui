@@ -224,27 +224,58 @@ class _EnregistrerChaleurPageAmelioreeState
         );
       }
 
-      // 5. Planifier notifications (si possible)
+      // 5. Planifier notifications intelligentes
       try {
-        if (!prediction.estAnoestrus) {
-          await _notificationService.planifierRappelProchaineChaleur(
-            brebisId: _brebisIdAsInt,
-            nomBrebis: widget.brebis['nom'] ?? 'Sans nom',
-            datePrevue: prediction.dateMin,
-            source: widget.source,
-          );
-        }
+        final nomBrebis = widget.brebis['nom'] ?? 'Sans nom';
 
-        await _notificationService.planifierRappelFenetreFertile(
+        // ★ N1 — Alerte immédiate : fenêtre d'accouplement ouverte
+        await _notificationService.planifierAlertPreparationAccouplement(
           brebisId: _brebisIdAsInt,
-          nomBrebis: widget.brebis['nom'] ?? 'Sans nom',
+          nomBrebis: nomBrebis,
           dateChaleur: dateComplete,
           source: widget.source,
         );
+
+        // ★ N3 — Alerte dernière chance à H+20
+        await _notificationService.planifierAlerteDerniereChance(
+          brebisId: _brebisIdAsInt,
+          nomBrebis: nomBrebis,
+          dateChaleur: dateComplete,
+          source: widget.source,
+        );
+
+        // ★ Rappel fenêtre fertile (existant)
+        await _notificationService.planifierRappelFenetreFertile(
+          brebisId: _brebisIdAsInt,
+          nomBrebis: nomBrebis,
+          dateChaleur: dateComplete,
+          source: widget.source,
+        );
+
+        // ★ N2 — Alerte J+15 si pas de gestation + rappel prochain cycle
+        if (!prediction.estAnoestrus) {
+          await _notificationService.planifierRappelProchaineChaleur(
+            brebisId: _brebisIdAsInt,
+            nomBrebis: nomBrebis,
+            datePrevue: prediction.dateMin,
+            source: widget.source,
+          );
+
+          // J+15 : si pas de gestation confirmée → préparer prochain cycle
+          await _notificationService.planifierAlertJ15SansGestation(
+            brebisId: _brebisIdAsInt,
+            nomBrebis: nomBrebis,
+            dateChaleur: dateComplete,
+            source: widget.source,
+            prochaineChaleeurPrevue: prediction.dateMin,
+          );
+        }
+
       } catch (e) {
         debugPrint("⚠️ Erreur planification notifications: $e");
-        // Continuer même si les notifications échouent
+        // L'app continue même si les notifications échouent
       }
+
 
       // 6. Calculer fenêtre fertile
       final debutFenetre = dateComplete.add(

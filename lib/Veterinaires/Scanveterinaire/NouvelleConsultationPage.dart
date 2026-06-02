@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+// ============================================================
+// NOUVELLE CONSULTATION — version synchronisée
+// ============================================================
 class NouvelleConsultationPage extends StatefulWidget {
   final Map<String, dynamic> animal;
   final String source;
@@ -12,19 +15,23 @@ class NouvelleConsultationPage extends StatefulWidget {
   });
 
   @override
-  State<NouvelleConsultationPage> createState() => _NouvelleConsultationPageState();
+  State<NouvelleConsultationPage> createState() =>
+      _NouvelleConsultationPageState();
 }
 
-class _NouvelleConsultationPageState extends State<NouvelleConsultationPage> {
+class _NouvelleConsultationPageState
+    extends State<NouvelleConsultationPage> {
   final _formKey = GlobalKey<FormState>();
   final supabase = Supabase.instance.client;
 
-  // Controllers
   final _motifController = TextEditingController();
   final _examenController = TextEditingController();
   final _diagnosticController = TextEditingController();
   final _traitementController = TextEditingController();
   final _observationsController = TextEditingController();
+  final _temperatureController = TextEditingController();
+  final _poidsController = TextEditingController();
+  final _fcController = TextEditingController();
 
   DateTime _dateConsultation = DateTime.now();
   TimeOfDay _heureConsultation = TimeOfDay.now();
@@ -37,15 +44,32 @@ class _NouvelleConsultationPageState extends State<NouvelleConsultationPage> {
     _diagnosticController.dispose();
     _traitementController.dispose();
     _observationsController.dispose();
+    _temperatureController.dispose();
+    _poidsController.dispose();
+    _fcController.dispose();
     super.dispose();
   }
 
   Future<void> _enregistrerConsultation() async {
     if (!_formKey.currentState!.validate()) return;
-
     setState(() => _isLoading = true);
 
     try {
+      // ✅ Vérification session avant insertion
+      final veterinaire = supabase.auth.currentUser;
+      if (veterinaire == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ Session expirée. Veuillez vous reconnecter.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+        return;
+      }
+
       final dateComplete = DateTime(
         _dateConsultation.year,
         _dateConsultation.month,
@@ -54,12 +78,8 @@ class _NouvelleConsultationPageState extends State<NouvelleConsultationPage> {
         _heureConsultation.minute,
       );
 
-      final veterinaire = supabase.auth.currentUser;
-      if (veterinaire == null) {
-        throw Exception("Vétérinaire non connecté");
-      }
-
-      await supabase.from('consultations').insert({
+      // ✅ Champs alignés avec la table consultations de Supabase
+      final Map<String, dynamic> data = {
         'animal_id': widget.animal['id'],
         'source': widget.source,
         'veterinaire_id': veterinaire.id,
@@ -70,31 +90,46 @@ class _NouvelleConsultationPageState extends State<NouvelleConsultationPage> {
         'traitement': _traitementController.text.trim(),
         'observations': _observationsController.text.trim(),
         'created_at': DateTime.now().toIso8601String(),
-      });
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      // Champs optionnels numériques
+      if (_temperatureController.text.isNotEmpty) {
+        data['temperature_c'] =
+            double.tryParse(_temperatureController.text.trim());
+      }
+      if (_poidsController.text.isNotEmpty) {
+        data['poids_kg'] =
+            double.tryParse(_poidsController.text.trim());
+      }
+      if (_fcController.text.isNotEmpty) {
+        data['frequence_cardiaque'] =
+            int.tryParse(_fcController.text.trim());
+      }
+
+      await supabase.from('consultations').insert(data);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("✅ Consultation enregistrée avec succès"),
+            content: Text('✅ Consultation enregistrée avec succès'),
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(context, true); // Retourner true pour indiquer succès
+        Navigator.pop(context, true);
       }
     } catch (e) {
-      debugPrint("❌ Erreur enregistrement consultation: $e");
+      debugPrint('❌ Erreur enregistrement: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("❌ Erreur: ${e.toString()}"),
+            content: Text('❌ Erreur: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -102,7 +137,7 @@ class _NouvelleConsultationPageState extends State<NouvelleConsultationPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Nouvelle Consultation"),
+        title: const Text('Nouvelle Consultation'),
         backgroundColor: Colors.green[700],
       ),
       body: _isLoading
@@ -112,7 +147,7 @@ class _NouvelleConsultationPageState extends State<NouvelleConsultationPage> {
                 children: [
                   CircularProgressIndicator(),
                   SizedBox(height: 16),
-                  Text("Enregistrement en cours..."),
+                  Text('Enregistrement en cours...'),
                 ],
               ),
             )
@@ -123,20 +158,13 @@ class _NouvelleConsultationPageState extends State<NouvelleConsultationPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Info animal
                     _buildAnimalInfo(),
                     const SizedBox(height: 24),
-
-                    const Text(
-                      "Informations de consultation",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    const Text('Informations de consultation',
+                        style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
                     const SizedBox(height: 16),
-
-                    // Date et heure
                     Row(
                       children: [
                         Expanded(child: _buildDatePicker()),
@@ -145,109 +173,133 @@ class _NouvelleConsultationPageState extends State<NouvelleConsultationPage> {
                       ],
                     ),
                     const SizedBox(height: 16),
+                    _buildTextField(_motifController, 'Motif de consultation *',
+                        'Ex: Contrôle de routine, boiterie...', Icons.comment,
+                        maxLines: 2, required: true),
+                    const SizedBox(height: 16),
+                    _buildTextField(
+                        _examenController,
+                        'Examen clinique *',
+                        'Température, fréquence cardiaque, état général...',
+                        Icons.monitor_heart,
+                        maxLines: 4,
+                        required: true),
+                    const SizedBox(height: 16),
+                    _buildTextField(_diagnosticController, 'Diagnostic *',
+                        'Diagnostic posé suite à l\'examen', Icons.assignment,
+                        maxLines: 3, required: true),
+                    const SizedBox(height: 16),
+                    _buildTextField(_traitementController,
+                        'Traitement prescrit *',
+                        'Médicaments, posologie, durée...', Icons.medication,
+                        maxLines: 4, required: true),
+                    const SizedBox(height: 16),
 
-                    // Motif
+                    // ✅ Champs numériques alignés avec la table Supabase
+                    const Text('Paramètres vitaux (optionnel)',
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _temperatureController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Température (°C)',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.thermostat,
+                                  color: Colors.orange),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _poidsController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Poids (kg)',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.monitor_weight,
+                                  color: Colors.green),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
                     TextFormField(
-                      controller: _motifController,
+                      controller: _fcController,
+                      keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
-                        labelText: "Motif de consultation *",
-                        hintText: "Ex: Contrôle de routine, boiterie...",
+                        labelText: 'Fréquence cardiaque (bpm)',
                         border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.comment, color: Colors.green),
+                        prefixIcon:
+                            Icon(Icons.favorite, color: Colors.red),
                       ),
-                      maxLines: 2,
-                      validator: (val) => val!.isEmpty ? 'Champ requis' : null,
                     ),
                     const SizedBox(height: 16),
 
-                    // Examen clinique
-                    TextFormField(
-                      controller: _examenController,
-                      decoration: const InputDecoration(
-                        labelText: "Examen clinique *",
-                        hintText: "Température, fréquence cardiaque, état général...",
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.monitor_heart, color: Colors.green),
-                      ),
-                      maxLines: 4,
-                      validator: (val) => val!.isEmpty ? 'Champ requis' : null,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Diagnostic
-                    TextFormField(
-                      controller: _diagnosticController,
-                      decoration: const InputDecoration(
-                        labelText: "Diagnostic *",
-                        hintText: "Diagnostic posé suite à l'examen",
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.assignment, color: Colors.green),
-                      ),
-                      maxLines: 3,
-                      validator: (val) => val!.isEmpty ? 'Champ requis' : null,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Traitement
-                    TextFormField(
-                      controller: _traitementController,
-                      decoration: const InputDecoration(
-                        labelText: "Traitement prescrit *",
-                        hintText: "Médicaments, posologie, durée...",
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.medication, color: Colors.green),
-                      ),
-                      maxLines: 4,
-                      validator: (val) => val!.isEmpty ? 'Champ requis' : null,
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Observations
-                    TextFormField(
-                      controller: _observationsController,
-                      decoration: const InputDecoration(
-                        labelText: "Observations additionnelles",
-                        hintText: "Remarques, recommandations...",
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.notes, color: Colors.green),
-                      ),
-                      maxLines: 3,
-                    ),
+                    _buildTextField(_observationsController,
+                        'Observations additionnelles',
+                        'Remarques, recommandations...', Icons.notes,
+                        maxLines: 3),
                     const SizedBox(height: 32),
-
-                    // Bouton enregistrer
                     SizedBox(
                       width: double.infinity,
                       height: 50,
                       child: ElevatedButton.icon(
-                        onPressed: _isLoading ? null : _enregistrerConsultation,
+                        onPressed:
+                            _isLoading ? null : _enregistrerConsultation,
                         icon: const Icon(Icons.check_circle),
-                        label: const Text(
-                          "Enregistrer la consultation",
-                          style: TextStyle(fontSize: 16),
-                        ),
+                        label: const Text('Enregistrer la consultation',
+                            style: TextStyle(fontSize: 16)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.green[700],
                           foregroundColor: Colors.white,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 16),
-
+                    const SizedBox(height: 12),
                     Center(
                       child: Text(
-                        "* Champs obligatoires",
+                        '* Champs obligatoires',
                         style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                          fontStyle: FontStyle.italic,
-                        ),
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic),
                       ),
                     ),
                   ],
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildTextField(
+    TextEditingController controller,
+    String label,
+    String hint,
+    IconData icon, {
+    int maxLines = 1,
+    bool required = false,
+  }) {
+    return TextFormField(
+      controller: controller,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        border: const OutlineInputBorder(),
+        prefixIcon: Icon(icon, color: Colors.green),
+      ),
+      maxLines: maxLines,
+      validator: required
+          ? (val) => (val == null || val.isEmpty) ? 'Champ requis' : null
+          : null,
     );
   }
 
@@ -261,34 +313,32 @@ class _NouvelleConsultationPageState extends State<NouvelleConsultationPage> {
       ),
       child: Row(
         children: [
-          if (widget.animal['image_url'] != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                widget.animal['image_url'],
-                width: 60,
-                height: 60,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return Container(
+          widget.animal['image_url'] != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    widget.animal['image_url'],
                     width: 60,
                     height: 60,
-                    color: Colors.grey[300],
-                    child: const Icon(Icons.pets, size: 30),
-                  );
-                },
-              ),
-            )
-          else
-            Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                color: Colors.green[100],
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.pets, size: 30, color: Colors.green),
-            ),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      width: 60,
+                      height: 60,
+                      color: Colors.grey[300],
+                      child: const Icon(Icons.pets, size: 30),
+                    ),
+                  ),
+                )
+              : Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    color: Colors.green[100],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.pets,
+                      size: 30, color: Colors.green),
+                ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -297,27 +347,19 @@ class _NouvelleConsultationPageState extends State<NouvelleConsultationPage> {
                 Text(
                   widget.animal['nom'] ?? 'Sans nom',
                   style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                      fontSize: 18, fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  "Race: ${widget.animal['race'] ?? 'N/A'}",
-                  style: TextStyle(fontSize: 14, color: Colors.grey[700]),
-                ),
-                Text(
-                  "Sexe: ${widget.animal['sexe'] ?? 'N/A'}",
-                  style: TextStyle(fontSize: 14, color: Colors.grey[700]),
-                ),
-                Text(
-                  "Tag: ${widget.animal['tag_rfid'] ?? 'N/A'}",
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                    fontFamily: 'monospace',
-                  ),
-                ),
+                Text('Race: ${widget.animal['race'] ?? 'N/A'}',
+                    style: TextStyle(
+                        fontSize: 14, color: Colors.grey[700])),
+                Text('Sexe: ${widget.animal['sexe'] ?? 'N/A'}',
+                    style: TextStyle(
+                        fontSize: 14, color: Colors.grey[700])),
+                Text('Tag: ${widget.animal['tag_rfid'] ?? 'N/A'}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                        fontFamily: 'monospace')),
               ],
             ),
           ),
@@ -330,11 +372,11 @@ class _NouvelleConsultationPageState extends State<NouvelleConsultationPage> {
     return Card(
       child: ListTile(
         leading: const Icon(Icons.calendar_today, color: Colors.green),
-        title: const Text("Date", style: TextStyle(fontSize: 12)),
+        title: const Text('Date', style: TextStyle(fontSize: 12)),
         subtitle: Text(
-          "${_dateConsultation.day.toString().padLeft(2, '0')}/"
-          "${_dateConsultation.month.toString().padLeft(2, '0')}/"
-          "${_dateConsultation.year}",
+          '${_dateConsultation.day.toString().padLeft(2, '0')}/'
+          '${_dateConsultation.month.toString().padLeft(2, '0')}/'
+          '${_dateConsultation.year}',
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         onTap: () async {
@@ -356,10 +398,10 @@ class _NouvelleConsultationPageState extends State<NouvelleConsultationPage> {
     return Card(
       child: ListTile(
         leading: const Icon(Icons.access_time, color: Colors.green),
-        title: const Text("Heure", style: TextStyle(fontSize: 12)),
+        title: const Text('Heure', style: TextStyle(fontSize: 12)),
         subtitle: Text(
-          "${_heureConsultation.hour.toString().padLeft(2, '0')}:"
-          "${_heureConsultation.minute.toString().padLeft(2, '0')}",
+          '${_heureConsultation.hour.toString().padLeft(2, '0')}:'
+          '${_heureConsultation.minute.toString().padLeft(2, '0')}',
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         onTap: () async {

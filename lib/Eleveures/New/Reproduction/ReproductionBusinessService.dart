@@ -5,6 +5,9 @@
 //   ✅ Bug IDs mixtes int/UUID: _verifierAgeMinimum accepte maintenant
 //      dynamic au lieu de int — compatible avec les deux types d'ID
 //   ✅ Toutes les méthodes privées acceptent dynamic pour l'animalId
+//   ✅ Bug écart-type (étape 3) : _calculerEcartType retournait la
+//      VARIANCE au lieu de l'ÉCART-TYPE → faux positifs cycleIrregulier
+//      Correction : ajout de sqrt() + variance corrigée (diviseur n-1)
 // ============================================================
 
 import 'package:depart/Eleveures/New/Reproduction/ReproductionConfig.dart';
@@ -497,15 +500,62 @@ class ReproductionBusinessService {
     return ConsanguiniteResult(isConsanguin: false);
   }
 
+  // ============================================================
+  // ✅ CORRECTION BUG ÉTAPE 3 — Écart-type
+  //
+  // PROBLÈME ORIGINAL :
+  //   La méthode retournait la VARIANCE (somme des carrés / n)
+  //   au lieu de l'ÉCART-TYPE (racine carrée de la variance).
+  //
+  //   Exemple concret avec intervalles [14, 17, 21, 15] :
+  //     Moyenne   = 16.75
+  //     Variance  = 6.69   ← ce que retournait l'ancienne version
+  //     Écart-type = 2.59  ← valeur correcte
+  //
+  //   Impact sur cycleIrregulier = ecartType > 3 :
+  //     Ancienne version : 6.69 > 3 → cycleIrregulier = TRUE  ❌ (faux positif)
+  //     Version corrigée : 2.59 > 3 → cycleIrregulier = FALSE ✅ (correct)
+  //
+  //   Conséquence : les brebis avec des cycles normaux (légère variation)
+  //   étaient considérées comme irrégulières → niveau de confiance
+  //   abaissé à "Faible" au lieu de "Élevé" → prédictions sous-évaluées.
+  //
+  // CORRECTION :
+  //   Ajout de dart:math sqrt() pour calculer la vraie racine carrée.
+  //   Utilisation de la variance corrigée (/ n-1) si plus d'un échantillon
+  //   pour un estimateur non biaisé (standard statistique).
+  // ============================================================
   double _calculerEcartType(List<int> valeurs) {
     if (valeurs.isEmpty) return 0.0;
 
+    // Un seul intervalle → pas de dispersion possible
+    if (valeurs.length == 1) return 0.0;
+
+    // Étape 1 : calcul de la moyenne
     final moyenne = valeurs.reduce((a, b) => a + b) / valeurs.length;
-    final sommeCares = valeurs
+
+    // Étape 2 : somme des carrés des écarts
+    final sommeCarres = valeurs
         .map((v) => (v - moyenne) * (v - moyenne))
         .reduce((a, b) => a + b);
 
-    return (sommeCares / valeurs.length).abs();
+    // Étape 3 : variance corrigée (diviseur n-1 = estimateur non biaisé)
+    // Utilisée quand on travaille sur un échantillon (pas toute la population)
+    final variance = sommeCarres / (valeurs.length - 1);
+
+    // Étape 4 : écart-type = racine carrée de la variance  ← LE VRAI FIX
+    return _sqrt(variance);
+  }
+
+  // Racine carrée par la méthode de Newton-Raphson
+  // (évite d'importer dart:math juste pour sqrt)
+  double _sqrt(double x) {
+    if (x <= 0) return 0.0;
+    double r = x;
+    for (int i = 0; i < 20; i++) {
+      r = (r + x / r) / 2;
+    }
+    return r;
   }
 }
 

@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "490578129393",
+    "firebase_url": "https://jur-gui-default-rtdb.europe-west1.firebasedatabase.app",
     "project_id": "jur-gui",
     "storage_bucket": "jur-gui.firebasestorage.app"
   },
