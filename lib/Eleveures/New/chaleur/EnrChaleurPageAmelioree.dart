@@ -1,7 +1,17 @@
 // ============================================================
-// ENREGISTRER CHALEUR - VERSION CORRIGÉE
-// Fix: Gestion correcte des IDs mixtes (int pour nee, UUID pour achete)
+// ENREGISTRER CHALEUR — VERSION FINALE CORRIGÉE
+// Fichier: lib/Eleveures/New/chaleur/EnrChaleurPageAmelioree.dart
+//
+// ✅ BUG CORRIGÉ : _brebisIdAsInt remplacé par _brebisId
+//    pour tous les appels NotificationService.
+//    Raison : hashCode.abs() sur un UUID pouvait générer des
+//    collisions d'IDs → notifications s'écrasaient entre brebis.
+//    NotificationIdManager gère les clés String nativement.
+//
+// ✅ _brebisIdAsInt conservé UNIQUEMENT pour calculerProchaineChaleur
+//    qui attend un int (ReproductionBusinessService).
 // ============================================================
+
 import 'package:depart/Eleveures/New/Accouplemt/Accouplement..dart';
 import 'package:depart/Eleveures/New/Accouplemt/ConsanguiniteService.dart';
 import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
@@ -22,11 +32,11 @@ class EnregistrerChaleurPageAmelioree extends StatefulWidget {
   });
 
   @override
-  State<EnregistrerChaleurPageAmelioree> createState() => 
+  State<EnregistrerChaleurPageAmelioree> createState() =>
       _EnregistrerChaleurPageAmelioreeState();
 }
 
-class _EnregistrerChaleurPageAmelioreeState 
+class _EnregistrerChaleurPageAmelioreeState
     extends State<EnregistrerChaleurPageAmelioree> {
   final supabase = Supabase.instance.client;
   final _formKey = GlobalKey<FormState>();
@@ -39,28 +49,26 @@ class _EnregistrerChaleurPageAmelioreeState
   final _signesController = TextEditingController();
   final _notesController = TextEditingController();
   bool _isLoading = false;
-  
+
   // Données enrichies
   bool _estGestante = false;
   bool _enLactation = false;
   Map<String, dynamic>? _derniereChaleur;
   int? _intervalleJours;
-  
+
   // Validation
   ValidationResult? _validationResult;
 
-  // CORRECTION: Garder l'ID dans son format original (int ou String)
+  // ── ID original — int pour 'nee', UUID String pour 'achete' ──
+  // ✅ Utilisé pour TOUTES les notifications (pas de hashCode)
   dynamic get _brebisId => widget.brebis['id'];
 
-  // CORRECTION: Conversion sécurisée pour les APIs qui nécessitent int
+  // ── ID int — UNIQUEMENT pour ReproductionBusinessService ─────
+  // ⚠️ Ne pas utiliser pour les notifications (risque de collision)
   int get _brebisIdAsInt {
     final id = widget.brebis['id'];
     if (id is int) return id;
-    if (id is String) {
-      // Si c'est un UUID, on ne peut pas le convertir en int
-      // On utilise hashCode comme ID temporaire
-      return id.hashCode.abs();
-    }
+    if (id is String) return id.hashCode.abs();
     throw Exception('ID invalide: $id');
   }
 
@@ -76,6 +84,10 @@ class _EnregistrerChaleurPageAmelioreeState
     _notesController.dispose();
     super.dispose();
   }
+
+  // ============================================================
+  // CHARGEMENT DONNÉES INITIALES
+  // ============================================================
 
   Future<void> _chargerDonneesInitiales() async {
     try {
@@ -111,7 +123,9 @@ class _EnregistrerChaleurPageAmelioreeState
         if (derniereMiseBas != null) {
           final dateMiseBas = DateTime.parse(derniereMiseBas['date_mise_bas']);
           final joursDepuis = DateTime.now().difference(dateMiseBas).inDays;
-          _enLactation = joursDepuis < ReproductionConfig.dureeLactationJours && joursDepuis > 0;
+          _enLactation =
+              joursDepuis < ReproductionConfig.dureeLactationJours &&
+              joursDepuis > 0;
         }
       } catch (e) {
         debugPrint("⚠️ Erreur vérification lactation: $e");
@@ -139,6 +153,10 @@ class _EnregistrerChaleurPageAmelioreeState
     }
   }
 
+  // ============================================================
+  // ENREGISTREMENT
+  // ============================================================
+
   Future<void> _validerEtEnregistrer() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -154,7 +172,7 @@ class _EnregistrerChaleurPageAmelioreeState
         _heureSelectionnee.minute,
       );
 
-      // 2. Validation métier basique
+      // 2. Validation — gestante
       if (_estGestante) {
         if (mounted) {
           _showErrorDialog(
@@ -165,119 +183,111 @@ class _EnregistrerChaleurPageAmelioreeState
         return;
       }
 
-      // Vérifier l'intervalle avec la dernière chaleur
+      // 3. Validation — intervalle avec dernière chaleur
       if (_intervalleJours != null) {
         if (_intervalleJours! < ReproductionConfig.cycleMinJours) {
           final confirmer = await _showConfirmationDialog(
             "Attention",
             ReproductionConfig.messageIntervalleCourtChaleur,
           );
-          
-          if (confirmer != true) {
-            return;
-          }
+          if (confirmer != true) return;
         } else if (_intervalleJours! > ReproductionConfig.cycleMaxJours) {
           final confirmer = await _showConfirmationDialog(
             "Attention",
             ReproductionConfig.messageIntervalleLongChaleur,
           );
-          
-          if (confirmer != true) {
-            return;
-          }
+          if (confirmer != true) return;
         }
       }
 
-      // 3. Enregistrer dans la base
+      // 4. Enregistrer dans Supabase
       await supabase.from('chaleurs').insert({
-        'animal_id': _brebisId, // Garder le format original
-        'source': widget.source,
+        'animal_id'  : _brebisId,  // format original conservé
+        'source'     : widget.source,
         'date_chaleur': dateComplete.toIso8601String(),
-        'intensite': _intensite,
-        'signes': _signesController.text.trim(),
-        'notes': _notesController.text.trim(),
-        'user_id': supabase.auth.currentUser!.id,
-        'created_at': DateTime.now().toIso8601String(),
+        'intensite'  : _intensite,
+        'signes'     : _signesController.text.trim(),
+        'notes'      : _notesController.text.trim(),
+        'user_id'    : supabase.auth.currentUser!.id,
+        'created_at' : DateTime.now().toIso8601String(),
       });
 
       debugPrint("✅ Chaleur enregistrée avec succès");
 
-      // 4. Calculer prédiction prochaine chaleur (si possible)
+      // 5. Calculer prédiction prochaine chaleur
       PredictionChaleur? prediction;
       try {
         prediction = await _businessService.calculerProchaineChaleur(
-          brebisId: _brebisIdAsInt, // Utiliser la version int pour le calcul
-          source: widget.source,
+          brebisId      : _brebisIdAsInt, // int requis par BusinessService
+          source        : widget.source,
           derniereChaleur: dateComplete,
         );
       } catch (e) {
         debugPrint("⚠️ Impossible de calculer la prédiction: $e");
-        // Créer une prédiction par défaut
         prediction = PredictionChaleur(
-          dateMin: dateComplete.add(Duration(days: ReproductionConfig.cycleMoyenJours - 2)),
-          dateMax: dateComplete.add(Duration(days: ReproductionConfig.cycleMoyenJours + 2)),
-          cycleMoyen: ReproductionConfig.cycleMoyenJours,
-          niveauConfiance: "Faible",
-          cycleIrregulier: false,
-          estAnoestrus: DateTime.now().month >= 6 && DateTime.now().month <= 8,
-          enLactation: _enLactation,
+          dateMin         : dateComplete.add(Duration(days: ReproductionConfig.cycleMoyenJours - 2)),
+          dateMax         : dateComplete.add(Duration(days: ReproductionConfig.cycleMoyenJours + 2)),
+          cycleMoyen      : ReproductionConfig.cycleMoyenJours,
+          niveauConfiance : "Faible",
+          cycleIrregulier : false,
+          estAnoestrus    : DateTime.now().month >= 6 && DateTime.now().month <= 8,
+          enLactation     : _enLactation,
         );
       }
 
-      // 5. Planifier notifications intelligentes
+      // 6. ✅ Planifier notifications — avec _brebisId (pas _brebisIdAsInt)
       try {
         final nomBrebis = widget.brebis['nom'] ?? 'Sans nom';
 
-        // ★ N1 — Alerte immédiate : fenêtre d'accouplement ouverte
+        // ★ N1 — Alerte immédiate + rappel H+6
         await _notificationService.planifierAlertPreparationAccouplement(
-          brebisId: _brebisIdAsInt,
-          nomBrebis: nomBrebis,
+          brebisId   : _brebisId,   // ✅ ID original
+          nomBrebis  : nomBrebis,
           dateChaleur: dateComplete,
-          source: widget.source,
+          source     : widget.source,
         );
 
-        // ★ N3 — Alerte dernière chance à H+20
+        // ★ N3 — Dernière chance H+20
         await _notificationService.planifierAlerteDerniereChance(
-          brebisId: _brebisIdAsInt,
-          nomBrebis: nomBrebis,
+          brebisId   : _brebisId,   // ✅ ID original
+          nomBrebis  : nomBrebis,
           dateChaleur: dateComplete,
-          source: widget.source,
+          source     : widget.source,
         );
 
-        // ★ Rappel fenêtre fertile (existant)
+        // ★ Fenêtre fertile
         await _notificationService.planifierRappelFenetreFertile(
-          brebisId: _brebisIdAsInt,
-          nomBrebis: nomBrebis,
+          brebisId   : _brebisId,   // ✅ ID original
+          nomBrebis  : nomBrebis,
           dateChaleur: dateComplete,
-          source: widget.source,
+          source     : widget.source,
         );
 
-        // ★ N2 — Alerte J+15 si pas de gestation + rappel prochain cycle
+        // ★ N2 — J+15 + rappel prochain cycle (hors anœstrus)
         if (!prediction.estAnoestrus) {
           await _notificationService.planifierRappelProchaineChaleur(
-            brebisId: _brebisIdAsInt,
-            nomBrebis: nomBrebis,
+            brebisId  : _brebisId,  // ✅ ID original
+            nomBrebis : nomBrebis,
             datePrevue: prediction.dateMin,
-            source: widget.source,
+            source    : widget.source,
           );
 
-          // J+15 : si pas de gestation confirmée → préparer prochain cycle
           await _notificationService.planifierAlertJ15SansGestation(
-            brebisId: _brebisIdAsInt,
-            nomBrebis: nomBrebis,
-            dateChaleur: dateComplete,
-            source: widget.source,
+            brebisId             : _brebisId,  // ✅ ID original
+            nomBrebis            : nomBrebis,
+            dateChaleur          : dateComplete,
+            source               : widget.source,
             prochaineChaleeurPrevue: prediction.dateMin,
           );
         }
 
+        debugPrint("✅ Toutes les notifications chaleur planifiées pour $nomBrebis");
       } catch (e) {
+        // Non bloquant — la chaleur est déjà enregistrée en BD
         debugPrint("⚠️ Erreur planification notifications: $e");
-        // L'app continue même si les notifications échouent
       }
 
-
-      // 6. Calculer fenêtre fertile
+      // 7. Calculer fenêtre fertile pour le dialogue
       final debutFenetre = dateComplete.add(
         Duration(hours: ReproductionConfig.debutFenetileHeures),
       );
@@ -285,13 +295,13 @@ class _EnregistrerChaleurPageAmelioreeState
         Duration(hours: ReproductionConfig.dureeChaleurHeures),
       );
 
-      // 7. Afficher résumé
+      // 8. Afficher résumé de succès
       if (mounted) {
         await _showSuccessDialog(
           dateComplete: dateComplete,
           debutFenetre: debutFenetre,
-          finFenetre: finFenetre,
-          prediction: prediction,
+          finFenetre  : finFenetre,
+          prediction  : prediction,
         );
       }
     } catch (e) {
@@ -300,13 +310,14 @@ class _EnregistrerChaleurPageAmelioreeState
         _showSnackBar("❌ Erreur: ${e.toString()}", Colors.red);
       }
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // DIALOGUE DE SUCCÈS AVEC NAVIGATION
+  // ============================================================
+  // DIALOGUES
+  // ============================================================
+
   Future<void> _showSuccessDialog({
     required DateTime dateComplete,
     required DateTime debutFenetre,
@@ -361,25 +372,21 @@ class _EnregistrerChaleurPageAmelioreeState
         actions: [
           TextButton(
             onPressed: () {
-              Navigator.pop(context); // Fermer dialogue
-              Navigator.pop(context, true); // Retourner au module avec succès
+              Navigator.pop(context);      // fermer dialogue
+              Navigator.pop(context, true); // retour au module
             },
             child: const Text("Terminer"),
           ),
           ElevatedButton.icon(
             onPressed: () async {
-              Navigator.pop(context); // Fermer dialogue
-              // Navigation vers accouplement
+              Navigator.pop(context);
               final result = await Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (context) => EnregistrerAccouplement(),
                 ),
               );
-              // Retourner au module avec le résultat
-              if (mounted) {
-                Navigator.pop(context, result ?? true);
-              }
+              if (mounted) Navigator.pop(context, result ?? true);
             },
             icon: const Icon(Icons.favorite),
             label: const Text("Accoupler maintenant"),
@@ -391,48 +398,6 @@ class _EnregistrerChaleurPageAmelioreeState
         ],
       ),
     );
-  }
-
-  Widget _buildInfoBox(String titre, String contenu, Color couleur) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: couleur.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: couleur.withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            titre,
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: couleur,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            contenu,
-            style: TextStyle(fontSize: 13, color: couleur.withOpacity(0.8)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _getColorForConfiance(String confiance) {
-    switch (confiance) {
-      case "Élevé":
-        return Colors.green;
-      case "Modéré":
-        return Colors.orange;
-      case "Faible":
-      case "Très faible":
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
   }
 
   Future<void> _showErrorDialog(String titre, String message) async {
@@ -477,9 +442,50 @@ class _EnregistrerChaleurPageAmelioreeState
     );
   }
 
+  // ============================================================
+  // UTILITAIRES UI
+  // ============================================================
+
+  Widget _buildInfoBox(String titre, String contenu, Color couleur) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: couleur.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: couleur.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            titre,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: couleur,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            contenu,
+            style: TextStyle(fontSize: 13, color: couleur.withOpacity(0.8)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getColorForConfiance(String confiance) {
+    switch (confiance) {
+      case "Élevé":   return Colors.green;
+      case "Modéré":  return Colors.orange;
+      case "Faible":
+      case "Très faible": return Colors.red;
+      default: return Colors.grey;
+    }
+  }
+
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
-    
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -489,13 +495,16 @@ class _EnregistrerChaleurPageAmelioreeState
     );
   }
 
-  String _formatDateTime(DateTime date) {
-    return "${date.day}/${date.month}/${date.year} à ${date.hour}h${date.minute.toString().padLeft(2, '0')}";
-  }
+  String _formatDateTime(DateTime date) =>
+      "${date.day}/${date.month}/${date.year} "
+      "à ${date.hour}h${date.minute.toString().padLeft(2, '0')}";
 
-  String _formatDate(DateTime date) {
-    return "${date.day}/${date.month}/${date.year}";
-  }
+  String _formatDate(DateTime date) =>
+      "${date.day}/${date.month}/${date.year}";
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
@@ -514,9 +523,11 @@ class _EnregistrerChaleurPageAmelioreeState
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // CARTE INFORMATION BREBIS
+
+                    // ── Info brebis ───────────────────────────
                     Card(
-                      color: Color(ReproductionConfig.colorPrimary).withOpacity(0.1),
+                      color: Color(ReproductionConfig.colorPrimary)
+                          .withOpacity(0.1),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(
@@ -540,7 +551,9 @@ class _EnregistrerChaleurPageAmelioreeState
                             const SizedBox(height: 8),
                             Text("Race: ${widget.brebis['race'] ?? 'N/A'}"),
                             if (_intervalleJours != null)
-                              Text("Dernière chaleur: il y a $_intervalleJours jours"),
+                              Text(
+                                "Dernière chaleur: il y a $_intervalleJours jours",
+                              ),
                             if (_estGestante)
                               const Text(
                                 "🤰 Gestante",
@@ -561,10 +574,10 @@ class _EnregistrerChaleurPageAmelioreeState
                         ),
                       ),
                     ),
-                    
+
                     const SizedBox(height: 24),
 
-                    // DATE ET HEURE
+                    // ── Date et heure ─────────────────────────
                     const Text(
                       "📅 Date et heure de la chaleur",
                       style: TextStyle(
@@ -573,7 +586,6 @@ class _EnregistrerChaleurPageAmelioreeState
                       ),
                     ),
                     const SizedBox(height: 12),
-                    
                     Row(
                       children: [
                         Expanded(
@@ -582,7 +594,8 @@ class _EnregistrerChaleurPageAmelioreeState
                               final date = await showDatePicker(
                                 context: context,
                                 initialDate: _dateSelectionnee,
-                                firstDate: DateTime.now().subtract(const Duration(days: 7)),
+                                firstDate: DateTime.now()
+                                    .subtract(const Duration(days: 7)),
                                 lastDate: DateTime.now(),
                               );
                               if (date != null) {
@@ -607,7 +620,8 @@ class _EnregistrerChaleurPageAmelioreeState
                             },
                             icon: const Icon(Icons.access_time),
                             label: Text(
-                              "${_heureSelectionnee.hour}h${_heureSelectionnee.minute.toString().padLeft(2, '0')}",
+                              "${_heureSelectionnee.hour}h"
+                              "${_heureSelectionnee.minute.toString().padLeft(2, '0')}",
                             ),
                           ),
                         ),
@@ -616,7 +630,7 @@ class _EnregistrerChaleurPageAmelioreeState
 
                     const SizedBox(height: 24),
 
-                    // INTENSITÉ
+                    // ── Intensité ─────────────────────────────
                     const Text(
                       "🔥 Intensité de la chaleur",
                       style: TextStyle(
@@ -625,37 +639,36 @@ class _EnregistrerChaleurPageAmelioreeState
                       ),
                     ),
                     const SizedBox(height: 12),
-                    
                     Wrap(
                       spacing: 8,
                       children: [
                         ChoiceChip(
                           label: const Text("Faible"),
                           selected: _intensite == 'Faible',
-                          onSelected: (selected) {
-                            setState(() => _intensite = selected ? 'Faible' : null);
-                          },
+                          onSelected: (selected) => setState(
+                            () => _intensite = selected ? 'Faible' : null,
+                          ),
                         ),
                         ChoiceChip(
                           label: const Text("Moyenne"),
                           selected: _intensite == 'Moyenne',
-                          onSelected: (selected) {
-                            setState(() => _intensite = selected ? 'Moyenne' : null);
-                          },
+                          onSelected: (selected) => setState(
+                            () => _intensite = selected ? 'Moyenne' : null,
+                          ),
                         ),
                         ChoiceChip(
                           label: const Text("Forte"),
                           selected: _intensite == 'Forte',
-                          onSelected: (selected) {
-                            setState(() => _intensite = selected ? 'Forte' : null);
-                          },
+                          onSelected: (selected) => setState(
+                            () => _intensite = selected ? 'Forte' : null,
+                          ),
                         ),
                       ],
                     ),
 
                     const SizedBox(height: 24),
 
-                    // SIGNES OBSERVÉS
+                    // ── Signes ────────────────────────────────
                     const Text(
                       "👁️ Signes observés (optionnel)",
                       style: TextStyle(
@@ -664,11 +677,11 @@ class _EnregistrerChaleurPageAmelioreeState
                       ),
                     ),
                     const SizedBox(height: 12),
-                    
                     TextFormField(
                       controller: _signesController,
                       decoration: const InputDecoration(
-                        hintText: "Ex: Agitation, acceptation du bélier, mucus...",
+                        hintText:
+                            "Ex: Agitation, acceptation du bélier, mucus...",
                         border: OutlineInputBorder(),
                       ),
                       maxLines: 2,
@@ -676,7 +689,7 @@ class _EnregistrerChaleurPageAmelioreeState
 
                     const SizedBox(height: 24),
 
-                    // NOTES
+                    // ── Notes ─────────────────────────────────
                     const Text(
                       "📝 Notes (optionnel)",
                       style: TextStyle(
@@ -685,7 +698,6 @@ class _EnregistrerChaleurPageAmelioreeState
                       ),
                     ),
                     const SizedBox(height: 12),
-                    
                     TextFormField(
                       controller: _notesController,
                       decoration: const InputDecoration(
@@ -697,20 +709,37 @@ class _EnregistrerChaleurPageAmelioreeState
 
                     const SizedBox(height: 32),
 
-                    // BOUTON ENREGISTRER
+                    // ── Bouton enregistrer ────────────────────
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: _validerEtEnregistrer,
-                        icon: const Icon(Icons.save),
-                        label: const Text("Enregistrer la chaleur"),
+                        onPressed:
+                            _isLoading ? null : _validerEtEnregistrer,
+                        icon: _isLoading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.save),
+                        label: Text(
+                          _isLoading
+                              ? "Enregistrement..."
+                              : "Enregistrer la chaleur",
+                        ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Color(ReproductionConfig.colorPrimary),
+                          backgroundColor:
+                              Color(ReproductionConfig.colorPrimary),
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.all(16),
                         ),
                       ),
                     ),
+
+                    const SizedBox(height: 16),
                   ],
                 ),
               ),
