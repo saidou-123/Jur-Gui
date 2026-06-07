@@ -17,6 +17,7 @@ import 'package:depart/Eleveures/New/Accouplemt/ConsanguiniteService.dart';
 import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
 import 'package:depart/Eleveures/New/Reproduction/ReproductionBusinessService.dart';
 import 'package:depart/Eleveures/New/Reproduction/ReproductionConfig.dart';
+import 'package:depart/Eleveures/New/chaleur/AlerteCycleService.dart'; // ✅ AJOUT
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -42,6 +43,7 @@ class _EnregistrerChaleurPageAmelioreeState
   final _formKey = GlobalKey<FormState>();
   final _businessService = ReproductionBusinessService();
   final _notificationService = NotificationService();
+  final _alerteCycleService = AlerteCycleService(); // ✅ AJOUT
 
   DateTime _dateSelectionnee = DateTime.now();
   TimeOfDay _heureSelectionnee = TimeOfDay.now();
@@ -58,6 +60,9 @@ class _EnregistrerChaleurPageAmelioreeState
 
   // Validation
   ValidationResult? _validationResult;
+
+  // ✅ AJOUT : résultat de l'analyse de cycle (affiché dans le dialogue de succès)
+  ResultatAnalyseCycle? _alerteCycle;
 
   // ── ID original — int pour 'nee', UUID String pour 'achete' ──
   // ✅ Utilisé pour TOUTES les notifications (pas de hashCode)
@@ -214,6 +219,25 @@ class _EnregistrerChaleurPageAmelioreeState
 
       debugPrint("✅ Chaleur enregistrée avec succès");
 
+      // ✅ CORRECTION BUG 2 : analyser le cycle après insertion
+      // Détecte cycle court / long / absence et envoie alerte si nécessaire
+      try {
+        final nomBrebis = widget.brebis['nom'] ?? 'Sans nom';
+        final alerte = await _alerteCycleService.analyserCycle(
+          animalId       : _brebisId,
+          source         : widget.source,
+          nomAnimal      : nomBrebis,
+          nouvelleChaleur: dateComplete,
+        );
+        if (!alerte.estNormal) {
+          setState(() => _alerteCycle = alerte);
+          debugPrint('⚠️ Alerte cycle détectée: ${alerte.type.name}');
+        }
+      } catch (e) {
+        // Non bloquant
+        debugPrint('⚠️ Erreur analyse cycle: $e');
+      }
+
       // 5. Calculer prédiction prochaine chaleur
       PredictionChaleur? prediction;
       try {
@@ -302,6 +326,7 @@ class _EnregistrerChaleurPageAmelioreeState
           debutFenetre: debutFenetre,
           finFenetre  : finFenetre,
           prediction  : prediction,
+          alerteCycle : _alerteCycle, // ✅ AJOUT : passer l'alerte si présente
         );
       }
     } catch (e) {
@@ -323,6 +348,7 @@ class _EnregistrerChaleurPageAmelioreeState
     required DateTime debutFenetre,
     required DateTime finFenetre,
     required PredictionChaleur prediction,
+    ResultatAnalyseCycle? alerteCycle, // ✅ AJOUT
   }) async {
     return showDialog(
       context: context,
@@ -357,6 +383,51 @@ class _EnregistrerChaleurPageAmelioreeState
                       "Prédiction peu fiable durant cette période",
                 _getColorForConfiance(prediction.niveauConfiance),
               ),
+              // ✅ AJOUT : afficher l'alerte de cycle si détectée
+              if (alerteCycle != null && !alerteCycle.estNormal) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: alerteCycle.couleur.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: alerteCycle.couleur.withOpacity(0.5),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(alerteCycle.icone,
+                          color: alerteCycle.couleur, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              alerteCycle.titreNotification,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                color: alerteCycle.couleur,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              alerteCycle.suggestion,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               const Text(
                 "📲 Vous recevrez des notifications de rappel",

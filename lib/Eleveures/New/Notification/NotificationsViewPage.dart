@@ -24,6 +24,8 @@ class _NotificationsViewPageState extends State<NotificationsViewPage>
 
   List<PendingNotificationRequest> _notificationsEnAttente = [];
   List<Map<String, dynamic>> _historiqueNotifications = [];
+  // ✅ AJOUT : push distants programmés en BD (visibles même app fermée)
+  List<Map<String, dynamic>> _pushProgrammes = [];
   
   bool _isLoading = true;
   int _totalNotifications = 0;
@@ -50,6 +52,7 @@ class _NotificationsViewPageState extends State<NotificationsViewPage>
       await Future.wait([
         _chargerNotificationsEnAttente(),
         _chargerHistoriqueNotifications(),
+        _chargerPushProgrammes(), // ✅ AJOUT
       ]);
     } catch (e) {
       debugPrint("❌ Erreur chargement: $e");
@@ -67,13 +70,89 @@ class _NotificationsViewPageState extends State<NotificationsViewPage>
       if (mounted) {
         setState(() {
           _notificationsEnAttente = pending;
-          _totalNotifications = pending.length;
+          // ✅ total = local + push BD (comptés ensemble dans la stat)
+          _totalNotifications = pending.length + _pushProgrammes.length;
         });
       }
 
       debugPrint("✅ ${pending.length} notifications en attente");
     } catch (e) {
       debugPrint("❌ Erreur chargement notifications: $e");
+    }
+  }
+
+  // ✅ AJOUT : charger les push distants programmés en BD
+  Future<void> _chargerPushProgrammes() async {
+    try {
+      final userId = _supabase.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final pushes = await _supabase
+          .from('notifications_programmees')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('statut', 'planifie')
+          .gte('date_envoi', DateTime.now().toIso8601String())
+          .order('date_envoi', ascending: true);
+
+      if (mounted) {
+        setState(() {
+          _pushProgrammes = List<Map<String, dynamic>>.from(pushes);
+          _totalNotifications =
+              _notificationsEnAttente.length + _pushProgrammes.length;
+        });
+      }
+      debugPrint('✅ ${pushes.length} push distants programmés chargés');
+    } catch (e) {
+      debugPrint('❌ Erreur chargement push programmés: $e');
+    }
+  }
+
+  // ✅ AJOUT : annuler un push distant en BD
+  Future<void> _annulerPushProgramme(String pushId, String nomAnimal) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Annuler ce rappel"),
+        content: Text(
+          "Voulez-vous vraiment annuler ce rappel push pour $nomAnimal ?",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("Non"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text("Oui, annuler"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      await _supabase
+          .from('notifications_programmees')
+          .update({'statut': 'annule'})
+          .eq('id', pushId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("✅ Rappel push annulé"),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+      await _chargerDonnees();
+    } catch (e) {
+      debugPrint('❌ Erreur annulation push: $e');
     }
   }
 
@@ -273,7 +352,7 @@ class _NotificationsViewPageState extends State<NotificationsViewPage>
   // ===== ONGLET: NOTIFICATIONS EN ATTENTE =====
 
   Widget _buildOngletEnAttente() {
-    if (_notificationsEnAttente.isEmpty) {
+    if (_notificationsEnAttente.isEmpty && _pushProgrammes.isEmpty) {
       return _buildEmptyState(
         Icons.notifications_off,
         "Aucune notification en attente",
@@ -283,13 +362,137 @@ class _NotificationsViewPageState extends State<NotificationsViewPage>
 
     return RefreshIndicator(
       onRefresh: _chargerDonnees,
-      child: ListView.builder(
+      child: ListView(
         padding: const EdgeInsets.all(16),
-        itemCount: _notificationsEnAttente.length,
-        itemBuilder: (context, index) {
-          final notif = _notificationsEnAttente[index];
-          return _buildNotificationCard(notif);
-        },
+        children: [
+          // ── Section : notifications locales ───────────────
+          if (_notificationsEnAttente.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.phone_android, size: 16,
+                      color: Colors.grey),
+                  const SizedBox(width: 6),
+                  Text(
+                    "Locales (${_notificationsEnAttente.length})",
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ...List.generate(
+              _notificationsEnAttente.length,
+              (i) => _buildNotificationCard(_notificationsEnAttente[i]),
+            ),
+          ],
+          // ── Section : push distants programmés ───────────
+          if (_pushProgrammes.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.cloud_queue, size: 16,
+                      color: Colors.grey),
+                  const SizedBox(width: 6),
+                  Text(
+                    "Push programmés — BD (${_pushProgrammes.length})",
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ...List.generate(
+              _pushProgrammes.length,
+              (i) => _buildPushProgrammeCard(_pushProgrammes[i]),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ✅ AJOUT : carte pour un push distant programmé
+  Widget _buildPushProgrammeCard(Map<String, dynamic> push) {
+    final type = push['type'] as String? ?? '';
+    final titre = push['titre'] as String? ?? '';
+    final nomAnimal = push['nom_animal'] as String? ?? '';
+    final dateEnvoi = DateTime.parse(push['date_envoi'] as String);
+    final pushId = push['id']?.toString() ?? '';
+
+    IconData icon;
+    Color color;
+
+    if (type.contains('chaleur') || type.contains('fenetre')) {
+      icon = Icons.local_fire_department;
+      color = Colors.orange;
+    } else if (type.contains('agnelage')) {
+      icon = Icons.pregnant_woman;
+      color = Colors.purple;
+    } else if (type.contains('derniere_chance')) {
+      icon = Icons.alarm;
+      color = Colors.red;
+    } else if (type.contains('alerte') || type.contains('cycle')) {
+      icon = Icons.warning_rounded;
+      color = Colors.deepOrange;
+    } else {
+      icon = Icons.cloud_queue;
+      color = Colors.blue;
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: color.withOpacity(0.15),
+          child: Icon(icon, color: color),
+        ),
+        title: Text(
+          titre,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 4),
+            Text(
+              nomAnimal,
+              style: const TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(Icons.cloud_queue, size: 12, color: Colors.grey[600]),
+                const SizedBox(width: 4),
+                Text(
+                  "Push — ${_formatDateRappel(dateEnvoi)}",
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        trailing: IconButton(
+          icon: const Icon(Icons.delete, color: Colors.red),
+          onPressed: pushId.isNotEmpty
+              ? () => _annulerPushProgramme(pushId, nomAnimal)
+              : null,
+          tooltip: "Annuler",
+        ),
       ),
     );
   }
