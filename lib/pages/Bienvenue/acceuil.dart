@@ -1,3 +1,5 @@
+//
+
 // ============================================================
 // PAGE D'ACCUEIL - VERSION OPTIMISÉE
 // Fichier: lib/pages/acceuil.dart

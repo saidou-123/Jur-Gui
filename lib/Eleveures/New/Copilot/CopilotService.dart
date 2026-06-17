@@ -48,6 +48,10 @@ class CopilotContextBuilder {
         _chargerChaleurs(userId),
         _chargerAccouplements(userId),
         _chargerAlertesActives(userId),
+        _chargerRappelsReproduction(userId),
+        _chargerVaccinations(userId),
+        _chargerAlertesSante(userId),
+        _chargerAgneaux(userId),
       ]);
 
       final brebis        = resultats[0] as List<Map<String, dynamic>>;
@@ -55,6 +59,10 @@ class CopilotContextBuilder {
       final chaleurs      = resultats[2] as List<Map<String, dynamic>>;
       final accouplements = resultats[3] as List<Map<String, dynamic>>;
       final alertes       = resultats[4] as List<Map<String, dynamic>>;
+      final rappels       = resultats[5] as List<Map<String, dynamic>>;
+      final vaccinations  = resultats[6] as List<Map<String, dynamic>>;
+      final alertesSante  = resultats[7] as List<Map<String, dynamic>>;
+      final agneaux       = resultats[8] as List<Map<String, dynamic>>;
 
       final now    = DateTime.now();
       final buffer = StringBuffer();
@@ -103,8 +111,10 @@ class CopilotContextBuilder {
         final scoreSante = b['score_sante'] != null
             ? '${(b['score_sante'] * 100).round()}%'
             : 'N/A';
+        final ageTexte   = _calculerAge(b['date_naissance'], now);
 
         buffer.write("• $nom");
+        if (ageTexte != null) buffer.write(" ($ageTexte)");
         if (gestante != null) {
           final j = gestante.difference(now).inDays;
           buffer.write(" [GESTANTE — agnelage dans ${j}j le ${_fmt(gestante)}]");
@@ -140,12 +150,84 @@ class CopilotContextBuilder {
       }
       buffer.writeln();
 
-      // ── Alertes actives ──────────────────────────────────
+      // ── Alertes actives (cycle) ───────────────────────────
       if (alertes.isNotEmpty) {
-        buffer.writeln("=== ALERTES ACTIVES ===");
+        buffer.writeln("=== ALERTES CYCLE ACTIVES ===");
         for (final a in alertes) {
           buffer.writeln(
               "⚠️ ${a['nom_animal']} — ${a['type_alerte']} : ${a['message']}");
+        }
+        buffer.writeln();
+      }
+
+      // ── Alertes santé actives ──────────────────────────────
+      if (alertesSante.isNotEmpty) {
+        buffer.writeln("=== ALERTES SANTÉ ACTIVES ===");
+        for (final a in alertesSante) {
+          final priorite = a['priorite'] ?? 'normale';
+          buffer.writeln(
+              "🏥 [${priorite.toString().toUpperCase()}] ${a['type_alerte']} : ${a['message']}");
+        }
+        buffer.writeln();
+      }
+
+      // ── Rappels de reproduction à venir ────────────────────
+      final rappelsAVenir = rappels.where((r) {
+        final d = DateTime.tryParse(r['date_rappel'] ?? '');
+        return d != null &&
+            r['statut'] == 'planifie' &&
+            d.isAfter(now.subtract(const Duration(days: 1)));
+      }).toList()
+        ..sort((a, b) => (a['date_rappel'] as String)
+            .compareTo(b['date_rappel'] as String));
+
+      if (rappelsAVenir.isNotEmpty) {
+        buffer.writeln("=== RAPPELS DE REPRODUCTION (à venir) ===");
+        for (final r in rappelsAVenir.take(15)) {
+          final d = DateTime.tryParse(r['date_rappel']);
+          final dStr = d != null ? _fmt(d) : '?';
+          buffer.writeln("📅 $dStr — ${r['type']} : ${r['message']}");
+        }
+        buffer.writeln();
+      }
+
+      // ── Vaccinations ────────────────────────────────────────
+      if (vaccinations.isNotEmpty) {
+        buffer.writeln("=== VACCINATIONS ===");
+        for (final v in vaccinations) {
+          final dVac = DateTime.tryParse(v['date_vaccination'] ?? '');
+          final dRap = DateTime.tryParse(v['date_rappel'] ?? '');
+          buffer.write("💉 ${v['nom_vaccin']}");
+          if (dVac != null) buffer.write(" — fait le ${_fmt(dVac)}");
+          if (dRap != null) {
+            final j = dRap.difference(now).inDays;
+            if (j < 0) {
+              buffer.write(" [RAPPEL EN RETARD de ${-j}j]");
+            } else if (j <= 30) {
+              buffer.write(" [rappel dans ${j}j le ${_fmt(dRap)}]");
+            } else {
+              buffer.write(" [prochain rappel : ${_fmt(dRap)}]");
+            }
+          }
+          buffer.writeln();
+        }
+        buffer.writeln();
+      }
+
+      // ── Agneaux nés ──────────────────────────────────────────
+      if (agneaux.isNotEmpty) {
+        buffer.writeln("=== AGNEAUX NÉS ===");
+        for (final a in agneaux) {
+          final d = DateTime.tryParse(a['date_naissance'] ?? '');
+          final nom = a['nom'] ?? 'Sans nom';
+          final sexe = a['sexe'] ?? '';
+          final etat = a['etat_naissance'] ?? 'vivant';
+          final poids = a['poids_naissance'];
+          buffer.write("🐑 $nom ($sexe)");
+          if (d != null) buffer.write(" né le ${_fmt(d)}");
+          if (poids != null) buffer.write(" — ${poids}kg");
+          if (etat != 'vivant') buffer.write(" [$etat]");
+          buffer.writeln();
         }
         buffer.writeln();
       }
@@ -238,6 +320,70 @@ class CopilotContextBuilder {
     return List<Map<String, dynamic>>.from(r);
   }
 
+  /// Rappels de reproduction planifiés (chaleurs, agnelages, sevrages, etc.)
+  Future<List<Map<String, dynamic>>> _chargerRappelsReproduction(String userId) async {
+    try {
+      final r = await _supabase
+          .from('rappels_reproduction')
+          .select('type, animal_id, source, date_rappel, message, statut')
+          .eq('user_id', userId)
+          .eq('statut', 'planifie')
+          .order('date_rappel', ascending: true)
+          .limit(30);
+      return List<Map<String, dynamic>>.from(r);
+    } catch (e) {
+      debugPrint('⚠️ _chargerRappelsReproduction: $e');
+      return [];
+    }
+  }
+
+  /// Vaccinations enregistrées (table peut être vide si non utilisée encore)
+  Future<List<Map<String, dynamic>>> _chargerVaccinations(String userId) async {
+    try {
+      final r = await _supabase
+          .from('vaccinations')
+          .select('animal_id, source, nom_vaccin, date_vaccination, date_rappel, observations')
+          .order('date_vaccination', ascending: false)
+          .limit(50);
+      return List<Map<String, dynamic>>.from(r);
+    } catch (e) {
+      debugPrint('⚠️ _chargerVaccinations: $e');
+      return [];
+    }
+  }
+
+  /// Alertes santé non résolues (vaccin expiré, suivi requis, etc.)
+  Future<List<Map<String, dynamic>>> _chargerAlertesSante(String userId) async {
+    try {
+      final r = await _supabase
+          .from('alertes_sante')
+          .select('animal_id, source, type_alerte, message, priorite, date_echeance')
+          .eq('resolue', false)
+          .order('priorite', ascending: false)
+          .limit(20);
+      return List<Map<String, dynamic>>.from(r);
+    } catch (e) {
+      debugPrint('⚠️ _chargerAlertesSante: $e');
+      return [];
+    }
+  }
+
+  /// Agneaux nés récemment (table peut être vide si non utilisée encore)
+  Future<List<Map<String, dynamic>>> _chargerAgneaux(String userId) async {
+    try {
+      final r = await _supabase
+          .from('agneaux')
+          .select('nom, sexe, poids_naissance, date_naissance, etat_naissance, race')
+          .eq('user_id', userId)
+          .order('date_naissance', ascending: false)
+          .limit(20);
+      return List<Map<String, dynamic>>.from(r);
+    } catch (e) {
+      debugPrint('⚠️ _chargerAgneaux: $e');
+      return [];
+    }
+  }
+
   // ── Helpers ───────────────────────────────────────────────
 
   DateTime? _estGestante(List accouplements, dynamic id, String src) {
@@ -294,6 +440,26 @@ class CopilotContextBuilder {
               a['source_brebis'] == src &&
               a['date_mise_bas'] != null)
           .length;
+
+  /// Calcule l'âge d'un animal à partir de sa date de naissance (si connue).
+  /// Retourne null si la date est absente (ex: animal_acheter sans date_naissance).
+  String? _calculerAge(dynamic dateNaissance, DateTime now) {
+    if (dateNaissance == null) return null;
+    final d = DateTime.tryParse(dateNaissance.toString());
+    if (d == null) return null;
+
+    final joursTotal = now.difference(d).inDays;
+    if (joursTotal < 0) return null;
+
+    if (joursTotal < 30) return '${joursTotal}j';
+    if (joursTotal < 365) {
+      final mois = (joursTotal / 30).floor();
+      return '${mois} mois';
+    }
+    final ans = (joursTotal / 365).floor();
+    final moisRestants = ((joursTotal % 365) / 30).floor();
+    return moisRestants > 0 ? '${ans}an ${moisRestants}m' : '${ans}an';
+  }
 
   String _fmt(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';

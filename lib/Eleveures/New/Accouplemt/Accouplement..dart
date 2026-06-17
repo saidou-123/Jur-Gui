@@ -12,76 +12,74 @@
 //   7. Vérification métier finale
 //   8. Insertion Supabase avec colonnes IA complètes
 //   9. Notifications agnelage (J-30, J-7, J-1)
-//  10. Dialog de succès + retour liste
+//  10. ★ ÉTAPE 5 : Surveillance retour chaleur J+17 et J+21
+//  11. Dialog de succès + retour liste
 //
-// ✅ CORRECTION BUG N+1 (v2) :
-//   AVANT : pour N brebis → N+2 requêtes HTTP (1 par brebis pour gestation)
-//   APRÈS : exactement 3 requêtes fixes quel que soit le nombre de brebis
-//     - Requête 1 : toutes les femelles achetées
-//     - Requête 2 : toutes les femelles nées
-//     - Requête 3 : tous les accouplements sans mise_bas (une seule fois)
-//   Le filtrage des gestantes se fait ensuite en mémoire avec un Set O(1).
+// ✅ CORRECTION BUG N+1 (v2) : 3 requêtes fixes peu importe le troupeau
+// ★  ÉTAPE 5 (v3) : planifierSurveillanceRetour() appelé après agnelage
 // ============================================================
-
+ 
 import 'package:depart/Eleveures/New/Accouplemt/ConsanguiniteService.dart';
 import 'package:depart/Eleveures/New/Accouplemt/ResultatConsanguinite.dart';
-import 'package:depart/Eleveures/New/Accouplemt/ResultatConsanguiniteWidget.dart' hide ResultatConsanguinite;
+import 'package:depart/Eleveures/New/Accouplemt/ResultatConsanguiniteWidget.dart';
+import 'package:depart/Eleveures/New/Accouplemt/RetourChaleurService.dart'; // ★ ÉTAPE 5
 import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
 import 'package:depart/Eleveures/New/Reproduction/ReproductionBusinessService.dart';
 import 'package:depart/Eleveures/New/Reproduction/ReproductionConfig.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+ 
 class EnregistrerAccouplement extends StatefulWidget {
   final Map<String, dynamic>? brebisPreSelectionnee;
   final String? sourcePreSelectionnee;
-
+ 
   const EnregistrerAccouplement({
     super.key,
     this.brebisPreSelectionnee,
     this.sourcePreSelectionnee,
   });
-
+ 
   @override
   State<EnregistrerAccouplement> createState() =>
       _EnregistrerAccouplementState();
 }
-
+ 
 class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
   // ── Services ──────────────────────────────────────────────
-  final supabase             = Supabase.instance.client;
-  final _formKey             = GlobalKey<FormState>();
-  final _businessService     = ReproductionBusinessService();
-  final _notificationService = NotificationService();
+  final supabase              = Supabase.instance.client;
+  final _formKey              = GlobalKey<FormState>();
+  final _businessService      = ReproductionBusinessService();
+  final _notificationService  = NotificationService();
   final _consanguiniteService = ConsanguiniteService();
-  final _notesController     = TextEditingController();
-
+  final _retourChaleurService = RetourChaleurService(); // ★ ÉTAPE 5
+  final _notesController      = TextEditingController();
+ 
   // ── Listes animaux ────────────────────────────────────────
   List<Map<String, dynamic>> _brebisDisponibles = [];
   List<Map<String, dynamic>> _beliersDisponibles = [];
-
+ 
   // ── Sélections ───────────────────────────────────────────
   Map<String, dynamic>? _brebisSelectionnee;
   Map<String, dynamic>? _belierSelectionne;
-
+ 
   // ── Détails accouplement ──────────────────────────────────
   DateTime  _dateAccouplement  = DateTime.now();
   TimeOfDay _heureAccouplement = TimeOfDay.now();
   String    _methodeAccouplement = 'Naturel';
-
+ 
   // ── Chaleur brebis ────────────────────────────────────────
   DateTime? _derniereChaleur;
   bool      _chaleurRecente = false;
-
+ 
   // ── Analyse IA ────────────────────────────────────────────
   bool                  _analyseIaEnCours = false;
   ResultatConsanguinite? _resultatIa;
   bool                  _analyseEffectuee = false;
-
+ 
   // ── États de chargement ───────────────────────────────────
   bool _isLoadingAnimaux = true;
   bool _isLoading        = false;
-
+ 
   // ─────────────────────────────────────────────────────────
   @override
   void initState() {
@@ -89,13 +87,13 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
     _brebisSelectionnee = widget.brebisPreSelectionnee;
     _chargerAnimaux();
   }
-
+ 
   @override
   void dispose() {
     _notesController.dispose();
     super.dispose();
   }
-
+ 
   // ──────────────────────────────────────────────────────────
   // 1. CHARGEMENT DES ANIMAUX
   // ──────────────────────────────────────────────────────────
@@ -105,12 +103,12 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) throw Exception('Non connecté');
-
+ 
       final results = await Future.wait([
         _chargerBrebisDisponibles(userId),
         _chargerBeliers(userId),
       ]);
-
+ 
       if (mounted) {
         setState(() {
           _brebisDisponibles  = results[0];
@@ -127,31 +125,16 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       }
     }
   }
-
+ 
   // ──────────────────────────────────────────────────────────
   // ✅ VERSION CORRIGÉE — 3 requêtes fixes au lieu de N+2
-  //
-  // PROBLÈME ORIGINAL (bug N+1) :
-  //   Pour chaque brebis dans la liste, une requête Supabase séparée
-  //   était faite pour vérifier si elle est gestante.
-  //   Exemple : 50 brebis = 52 requêtes HTTP → lent + consomme des données.
-  //
-  // SOLUTION :
-  //   Étape 1 — Charger toutes les femelles (2 requêtes parallèles)
-  //   Étape 2 — Charger TOUS les accouplements sans mise_bas (1 requête)
-  //   Étape 3 — Construire un Set des clés "source_id" des gestantes
-  //   Étape 4 — Filtrer en mémoire avec Set.contains() en O(1)
-  //
-  //   Résultat : toujours 3 requêtes, peu importe la taille du troupeau.
   // ──────────────────────────────────────────────────────────
   Future<List<Map<String, dynamic>>> _chargerBrebisDisponibles(
       String userId) async {
-
-    // ── Étape 1 : charger toutes les femelles en parallèle ──
+ 
     List<Map<String, dynamic>> toutes = [];
-
+ 
     final results = await Future.wait([
-      // Femelles achetées
       supabase
           .from('animal_acheter')
           .select('id, nom, race, image_url, tag_rfid')
@@ -167,8 +150,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
             debugPrint('⚠️ Brebis achetées: $e');
             return <Map<String, dynamic>>[];
           }),
-
-      // Femelles nées
+ 
       supabase
           .from('nouveaux_nee')
           .select('id, nom, race, image_url, tag_rfid')
@@ -185,15 +167,12 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
             return <Map<String, dynamic>>[];
           }),
     ]);
-
+ 
     toutes = [...results[0], ...results[1]];
     debugPrint('📋 Total femelles chargées: ${toutes.length}');
-
+ 
     if (toutes.isEmpty) return [];
-
-    // ── Étape 2 : UNE seule requête pour toutes les gestantes ──
-    // On récupère tous les accouplements sans date_mise_bas
-    // appartenant à cet éleveur — une seule fois pour tout le troupeau.
+ 
     Set<String> gestantesKeys = {};
     try {
       final accouplements = await supabase
@@ -201,41 +180,32 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
           .select('brebis_id, source_brebis')
           .eq('user_id', userId)
           .isFilter('date_mise_bas', null);
-
-      // ── Étape 3 : construire un Set de clés uniques ──
-      // Clé composite : "source__id" → exemple "achete__42" ou "nee__uuid"
-      // Utiliser __ comme séparateur pour éviter toute collision
-      // (un id ne peut pas contenir "__")
+ 
       gestantesKeys = {
         for (final acc in accouplements)
           '${acc['source_brebis']}__${acc['brebis_id']}'
       };
-
+ 
       debugPrint('🤰 Brebis gestantes détectées: ${gestantesKeys.length}');
     } catch (e) {
-      // Si la requête échoue (table manquante, erreur réseau),
-      // on retourne toutes les brebis sans filtrage plutôt que bloquer.
       debugPrint('⚠️ Impossible de charger les gestantes: $e — toutes incluses');
       return toutes;
     }
-
-    // ── Étape 4 : filtrage en mémoire O(1) par brebis ──
-    // Set.contains() est O(1) — aucune requête réseau supplémentaire.
+ 
     final disponibles = toutes
         .where((b) => !gestantesKeys.contains(
               '${b['source']}__${b['id']}',
             ))
         .toList();
-
+ 
     debugPrint(
       '✅ Brebis disponibles: ${disponibles.length} '
       '(${toutes.length - disponibles.length} gestantes exclues)',
     );
-
+ 
     return disponibles;
   }
-
-  // ── Chargement béliers — parallèle avec Future.wait ──────
+ 
   Future<List<Map<String, dynamic>>> _chargerBeliers(String userId) async {
     final results = await Future.wait([
       supabase
@@ -253,7 +223,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
             debugPrint('⚠️ Béliers achetés: $e');
             return <Map<String, dynamic>>[];
           }),
-
+ 
       supabase
           .from('nouveaux_nee')
           .select('id, nom, race, tag_rfid, image_url')
@@ -270,12 +240,12 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
             return <Map<String, dynamic>>[];
           }),
     ]);
-
+ 
     final tous = [...results[0], ...results[1]];
     debugPrint('🐏 Total béliers chargés: ${tous.length}');
     return tous;
   }
-
+ 
   // ──────────────────────────────────────────────────────────
   // 2. VÉRIFICATION CHALEUR (48h)
   // ──────────────────────────────────────────────────────────
@@ -290,7 +260,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
           .order('date_chaleur', ascending: false)
           .limit(1)
           .maybeSingle();
-
+ 
       if (chaleur != null) {
         _derniereChaleur = DateTime.parse(chaleur['date_chaleur']);
         _chaleurRecente  =
@@ -301,16 +271,13 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       }
       if (mounted) setState(() {});
     } catch (e) {
-      // La table "chaleurs" n'existe peut-être pas encore dans Supabase.
-      // Ce catch est intentionnellement silencieux pour ne pas bloquer le flux,
-      // mais on log l'erreur complète pour diagnostic.
       debugPrint('⚠️ Table chaleurs — erreur ou table manquante: $e');
       _derniereChaleur = null;
       _chaleurRecente  = false;
       if (mounted) setState(() {});
     }
   }
-
+ 
   // ──────────────────────────────────────────────────────────
   // 3. RÉINITIALISER ANALYSE IA
   // ──────────────────────────────────────────────────────────
@@ -320,7 +287,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       _analyseEffectuee = false;
     });
   }
-
+ 
   // ──────────────────────────────────────────────────────────
   // 4. ANALYSE IA CONSANGUINITÉ
   // ──────────────────────────────────────────────────────────
@@ -331,21 +298,21 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       return;
     }
     setState(() { _analyseIaEnCours = true; _resultatIa = null; });
-
+ 
     final resultat = await _consanguiniteService.analyserCouple(
       brebis: _brebisSelectionnee!,
       belier: _belierSelectionne!,
     );
-
+ 
     setState(() {
       _resultatIa       = resultat;
       _analyseIaEnCours  = false;
       _analyseEffectuee  = true;
     });
   }
-
+ 
   // ──────────────────────────────────────────────────────────
-  // 5–10. VALIDER ET ENREGISTRER
+  // 5–11. VALIDER ET ENREGISTRER
   // ──────────────────────────────────────────────────────────
   Future<void> _validerEtEnregistrer() async {
     if (!_formKey.currentState!.validate()) return;
@@ -357,7 +324,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       _showSnackBar('Veuillez sélectionner un bélier', Colors.orange);
       return;
     }
-
+ 
     // Confirmation si risque élevé
     if (_resultatIa != null && _resultatIa!.estRisque) {
       final ok = await _showConfirmationDialog(
@@ -368,9 +335,9 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       );
       if (ok != true) return;
     }
-
+ 
     setState(() => _isLoading = true);
-
+ 
     try {
       final dateComplete = DateTime(
         _dateAccouplement.year,
@@ -379,14 +346,14 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
         _heureAccouplement.hour,
         _heureAccouplement.minute,
       );
-
+ 
       final brebisId = _brebisSelectionnee!['id'] is String
           ? int.parse(_brebisSelectionnee!['id'])
           : _brebisSelectionnee!['id'] as int;
       final belierId = _belierSelectionne!['id'] is String
           ? int.parse(_belierSelectionne!['id'])
           : _belierSelectionne!['id'] as int;
-
+ 
       // Vérification métier
       final validation = await _businessService.peutAccoupler(
         brebisId         : brebisId,
@@ -395,7 +362,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
         sourceBelier     : _belierSelectionne!['source'],
         dateAccouplement : dateComplete,
       );
-
+ 
       if (!validation.isValid) {
         if (validation.severity == 'warning') {
           final ok = await _showConfirmationDialog('Attention', validation.message);
@@ -405,10 +372,10 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
           return;
         }
       }
-
+ 
       // Calcul fourchette agnelage
       final fourchette = _businessService.calculerFourchetteAgnelage(dateComplete);
-
+ 
       // Insertion Supabase avec colonnes IA complètes
       final result = await supabase.from('accouplements').insert({
         'brebis_id'            : _brebisSelectionnee!['id'],
@@ -437,24 +404,24 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
         'confiance_acceptable' : _resultatIa?.confianceAcceptable,
         'message_ia'           : _resultatIa?.message,
         'action_ia'            : _resultatIa?.action,
+        // ── Colonnes étape 5 ────────────────────────────────
+        'statut_gestation'     : 'en_attente', // ★ ÉTAPE 5 : initialiser le statut
       }).select('id').single();
-
+ 
       debugPrint('✅ Accouplement enregistré: ${result['id']}');
-
+ 
       // ★ Annuler alerte dernière chance — accouplement enregistré !
       await _notificationService.annulerAlerteDerniereChance(
         brebisId: _brebisSelectionnee!['id'],
         source  : _brebisSelectionnee!['source'],
       );
-
-      // ★ Annuler TOUS les anciens rappels (chaleur + ancien cycle agnelage)
-      //   AVANT de planifier les nouveaux — sinon les IDs seraient supprimés
-      //   du registre juste après avoir été créés (Bug #1 corrigé).
+ 
+      // ★ Annuler TOUS les anciens rappels
       await _notificationService.annulerRappelsBrebis(
         brebisId: _brebisSelectionnee!['id'],
         source  : _brebisSelectionnee!['source'],
       );
-
+ 
       // ★ Programmer les nouveaux rappels agnelage (J-30, J-7, J-1)
       await _notificationService.planifierRappelsAgnelage(
         brebisId          : _brebisSelectionnee!['id'],
@@ -463,7 +430,17 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
         source            : _brebisSelectionnee!['source'],
         accouplementId    : result['id'],
       );
-
+ 
+      // ★ ÉTAPE 5 : Planifier la surveillance retour chaleur J+17 et J+21
+      // Permet de détecter si la brebis est fécondée ou revient en chaleur
+      await _retourChaleurService.planifierSurveillanceRetour(
+        accouplementId   : result['id'],
+        brebisId         : _brebisSelectionnee!['id'],
+        source           : _brebisSelectionnee!['source'],
+        nomBrebis        : _brebisSelectionnee!['nom'] ?? 'Brebis',
+        dateAccouplement : dateComplete,
+      );
+ 
       if (mounted) {
         await _showSuccessDialog(
           dateAccouplement: dateComplete,
@@ -477,7 +454,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
+ 
   // ──────────────────────────────────────────────────────────
   // DIALOGS
   // ──────────────────────────────────────────────────────────
@@ -509,7 +486,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                 Color(ReproductionConfig.colorPrimary),
               ),
               const SizedBox(height: 12),
-
+ 
               // Badge IA enrichi
               if (_resultatIa != null)
                 Container(
@@ -576,7 +553,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                   ),
                 ),
               const SizedBox(height: 12),
-
+ 
               // Fourchette agnelage
               _buildInfoBox(
                 '📅 Agnelage prévu',
@@ -587,8 +564,8 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                 Colors.purple,
               ),
               const SizedBox(height: 12),
-
-              // Rappels programmés
+ 
+              // Rappels programmés — ENRICHI avec J+17 et J+21
               Container(
                 padding   : const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -603,6 +580,10 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 4),
+                    // ★ ÉTAPE 5 : afficher J+17 et J+21 dans le récapitulatif
+                    Text('• J+17 : ${_formatDate(dateAccouplement.add(Duration(days: ReproductionConfig.retourChaleurDebutJours)))} — Surveiller retour chaleur'),
+                    Text('• J+21 : ${_formatDate(dateAccouplement.add(Duration(days: ReproductionConfig.retourChaleurFinJours)))} — Contrôle gestation'),
+                    const Divider(height: 12),
                     Text('• 1 mois avant : '
                       '${_formatDate(fourchette['prevue']!.subtract(const Duration(days: 30)))}'),
                     Text('• 1 semaine avant : '
@@ -631,7 +612,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       ),
     );
   }
-
+ 
   Future<void> _showErrorDialog(String titre, String message) async {
     return showDialog(
       context: context,
@@ -648,7 +629,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       ),
     );
   }
-
+ 
   Future<bool?> _showConfirmationDialog(
       String titre, String message) async {
     return showDialog<bool>(
@@ -674,11 +655,10 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       ),
     );
   }
-
+ 
   // ──────────────────────────────────────────────────────────
   // UTILITAIRES
   // ──────────────────────────────────────────────────────────
-  /// Avatar circulaire avec photo (si image_url dispo) ou icône fallback.
   Widget _buildAnimalAvatar({
     required String? imageUrl,
     required IconData fallbackIcon,
@@ -695,20 +675,13 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
             width     : radius * 2,
             height    : radius * 2,
             fit       : BoxFit.cover,
-            errorBuilder: (_, __, ___) => Icon(
-              fallbackIcon,
-              color : color,
-              size  : radius,
-            ),
+            errorBuilder: (_, __, ___) => Icon(fallbackIcon, color: color, size: radius),
             loadingBuilder: (_, child, progress) => progress == null
                 ? child
                 : SizedBox(
                     width : radius * 2,
                     height: radius * 2,
-                    child : CircularProgressIndicator(
-                      strokeWidth: 1.5,
-                      color      : color,
-                    ),
+                    child : CircularProgressIndicator(strokeWidth: 1.5, color: color),
                   ),
           ),
         ),
@@ -720,7 +693,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       child          : Icon(fallbackIcon, color: color, size: radius),
     );
   }
-
+ 
   Widget _buildInfoBox(String titre, String contenu, Color color) {
     return Container(
       padding   : const EdgeInsets.all(12),
@@ -741,7 +714,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       ),
     );
   }
-
+ 
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -752,14 +725,14 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       ),
     );
   }
-
+ 
   String _formatDate(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/'
       '${d.month.toString().padLeft(2, '0')}/${d.year}';
-
+ 
   String _formatDateTime(DateTime d) =>
       '${_formatDate(d)} à ${d.hour}h${d.minute.toString().padLeft(2, '0')}';
-
+ 
   // ──────────────────────────────────────────────────────────
   // BUILD
   // ──────────────────────────────────────────────────────────
@@ -791,25 +764,17 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // ── Sélection brebis ──────────────
                         _buildSelectionBrebis(),
                         if (_brebisSelectionnee != null && !_chaleurRecente)
                           _buildAvertissementChaleur(),
                         const SizedBox(height: 16),
-
-                        // ── Sélection bélier ──────────────
                         _buildSelectionBelier(),
                         const SizedBox(height: 16),
-
-                        // ── Analyse IA ────────────────────
                         _buildSectionAnalyseIA(),
                         const SizedBox(height: 24),
-
-                        // ── Détails accouplement ──────────
                         const Text(
                           'Détails de l\'accouplement',
-                          style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold),
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 16),
                         _buildDatePicker(),
@@ -820,8 +785,6 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                         const SizedBox(height: 16),
                         _buildNotesField(),
                         const SizedBox(height: 32),
-
-                        // ── Bouton enregistrer ────────────
                         _buildSubmitButton(),
                         const SizedBox(height: 40),
                       ],
@@ -830,11 +793,11 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                 ),
     );
   }
-
+ 
   // ──────────────────────────────────────────────────────────
   // WIDGETS SECTION
   // ──────────────────────────────────────────────────────────
-
+ 
   Widget _buildSelectionBrebis() {
     return Card(
       child: Padding(
@@ -844,42 +807,30 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
           children: [
             Row(
               children: [
-                Icon(Icons.female,
-                    color: Color(ReproductionConfig.colorPrimary)),
+                Icon(Icons.female, color: Color(ReproductionConfig.colorPrimary)),
                 const SizedBox(width: 8),
                 const Text('Sélectionner la brebis',
-                    style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold)),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ],
             ),
             const SizedBox(height: 12),
-
-            // ── Champ saisie + autocomplétion ─────────────────
             Autocomplete<Map<String, dynamic>>(
               displayStringForOption: (b) => '${b['nom']} (${b['race']})',
-
               initialValue: _brebisSelectionnee != null
                   ? TextEditingValue(
-                      text:
-                          '${_brebisSelectionnee!['nom']} (${_brebisSelectionnee!['race']})',
+                      text: '${_brebisSelectionnee!['nom']} (${_brebisSelectionnee!['race']})',
                     )
                   : null,
-
               optionsBuilder: (TextEditingValue textEditingValue) {
-                if (textEditingValue.text.isEmpty) {
-                  return _brebisDisponibles;
-                }
+                if (textEditingValue.text.isEmpty) return _brebisDisponibles;
                 final query = textEditingValue.text.toLowerCase();
                 return _brebisDisponibles.where((b) {
                   final nom  = (b['nom']  ?? '').toString().toLowerCase();
                   final race = (b['race'] ?? '').toString().toLowerCase();
                   final rfid = (b['tag_rfid'] ?? '').toString().toLowerCase();
-                  return nom.contains(query) ||
-                         race.contains(query) ||
-                         rfid.contains(query);
+                  return nom.contains(query) || race.contains(query) || rfid.contains(query);
                 });
               },
-
               optionsViewBuilder: (context, onSelected, options) {
                 final primaryColor = Color(ReproductionConfig.colorPrimary);
                 return Align(
@@ -898,10 +849,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                           padding    : EdgeInsets.zero,
                           shrinkWrap : true,
                           itemCount  : options.length,
-                          separatorBuilder: (_, __) => Divider(
-                            height: 1,
-                            color : Colors.grey.shade200,
-                          ),
+                          separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey.shade200),
                           itemBuilder: (ctx, index) {
                             final brebis = options.elementAt(index);
                             final estSelectionnee =
@@ -910,14 +858,10 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                             return InkWell(
                               onTap: () => onSelected(brebis),
                               child: Container(
-                                color  : estSelectionnee
-                                    ? primaryColor.withOpacity(0.07)
-                                    : Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 8),
+                                color  : estSelectionnee ? primaryColor.withOpacity(0.07) : Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                 child: Row(
                                   children: [
-                                    // ── Photo ou icône ──────
                                     _buildAnimalAvatar(
                                       imageUrl    : brebis['image_url'],
                                       fallbackIcon: Icons.female,
@@ -925,40 +869,28 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                                       radius      : 22,
                                     ),
                                     const SizedBox(width: 12),
-                                    // ── Nom + race ──────────
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
+                                        crossAxisAlignment: CrossAxisAlignment.start,
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Text(
-                                            brebis['nom'] ?? '—',
+                                          Text(brebis['nom'] ?? '—',
                                             style: TextStyle(
                                               fontSize  : 14,
-                                              fontWeight: estSelectionnee
-                                                  ? FontWeight.bold
-                                                  : FontWeight.w500,
+                                              fontWeight: estSelectionnee ? FontWeight.bold : FontWeight.w500,
                                             ),
                                           ),
-                                          if ((brebis['race'] ?? '')
-                                              .isNotEmpty) ...[
+                                          if ((brebis['race'] ?? '').isNotEmpty) ...[
                                             const SizedBox(height: 2),
-                                            Text(
-                                              brebis['race'],
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color   : Colors.grey.shade600,
-                                              ),
+                                            Text(brebis['race'],
+                                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                                             ),
                                           ],
                                         ],
                                       ),
                                     ),
-                                    // ── Coche si sélectionnée ─
                                     if (estSelectionnee)
-                                      Icon(Icons.check_circle,
-                                          color: primaryColor, size: 20),
+                                      Icon(Icons.check_circle, color: primaryColor, size: 20),
                                   ],
                                 ),
                               ),
@@ -970,21 +902,14 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                   ),
                 );
               },
-
-              fieldViewBuilder: (
-                context,
-                textEditingController,
-                focusNode,
-                onFieldSubmitted,
-              ) {
+              fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
                 return TextFormField(
                   controller: textEditingController,
                   focusNode : focusNode,
                   decoration: InputDecoration(
                     border    : const OutlineInputBorder(),
                     hintText  : 'Chercher ou saisir le nom de la brebis...',
-                    prefixIcon: Icon(Icons.search,
-                        color: Color(ReproductionConfig.colorPrimary)),
+                    prefixIcon: Icon(Icons.search, color: Color(ReproductionConfig.colorPrimary)),
                     suffixIcon: _brebisSelectionnee != null
                         ? IconButton(
                             icon    : const Icon(Icons.clear, size: 18),
@@ -1002,11 +927,9 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                         : null,
                   ),
                   onFieldSubmitted: (_) => onFieldSubmitted(),
-                  validator: (_) =>
-                      _brebisSelectionnee == null ? 'Champ requis' : null,
+                  validator: (_) => _brebisSelectionnee == null ? 'Champ requis' : null,
                 );
               },
-
               onSelected: (brebis) async {
                 setState(() {
                   _brebisSelectionnee = brebis;
@@ -1017,16 +940,12 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                 await _chargerInfosBrebis();
               },
             ),
-
-            // Bandeau chaleur
             if (_derniereChaleur != null) ...[
               const SizedBox(height: 8),
               Container(
                 padding   : const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color       : _chaleurRecente
-                      ? Colors.green.shade50
-                      : Colors.orange.shade50,
+                  color       : _chaleurRecente ? Colors.green.shade50 : Colors.orange.shade50,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
@@ -1045,9 +964,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                             : '⚠️ Dernière chaleur : ${_formatDate(_derniereChaleur!)}',
                         style: TextStyle(
                           fontSize: 12,
-                          color   : _chaleurRecente
-                              ? Colors.green
-                              : Colors.orange,
+                          color   : _chaleurRecente ? Colors.green : Colors.orange,
                         ),
                       ),
                     ),
@@ -1060,7 +977,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       ),
     );
   }
-
+ 
   Widget _buildAvertissementChaleur() {
     return Container(
       margin    : const EdgeInsets.only(top: 16),
@@ -1078,15 +995,14 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
             child: Text(
               '⚠️ Aucune chaleur enregistrée dans les dernières 48h.\n'
               'Il est recommandé d\'accoupler pendant la chaleur.',
-              style: TextStyle(
-                  color: Colors.orange, fontWeight: FontWeight.bold),
+              style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold),
             ),
           ),
         ],
       ),
     );
   }
-
+ 
   Widget _buildSelectionBelier() {
     return Card(
       child: Padding(
@@ -1099,42 +1015,27 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                 Icon(Icons.male, color: Colors.blue.shade700),
                 const SizedBox(width: 8),
                 const Text('Sélectionner le bélier',
-                    style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold)),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ],
             ),
             const SizedBox(height: 12),
-
-            // ── Champ saisie + autocomplétion ─────────────────
             Autocomplete<Map<String, dynamic>>(
-              // Affiche le nom du bélier sélectionné dans le champ
               displayStringForOption: (b) => '${b['nom']} (${b['race']})',
-
-              // Valeur initiale si un bélier est déjà sélectionné
               initialValue: _belierSelectionne != null
                   ? TextEditingValue(
-                      text:
-                          '${_belierSelectionne!['nom']} (${_belierSelectionne!['race']})',
+                      text: '${_belierSelectionne!['nom']} (${_belierSelectionne!['race']})',
                     )
                   : null,
-
-              // Filtrage des suggestions selon la saisie
               optionsBuilder: (TextEditingValue textEditingValue) {
-                if (textEditingValue.text.isEmpty) {
-                  return _beliersDisponibles; // affiche tout si vide
-                }
+                if (textEditingValue.text.isEmpty) return _beliersDisponibles;
                 final query = textEditingValue.text.toLowerCase();
                 return _beliersDisponibles.where((b) {
-                  final nom   = (b['nom']  ?? '').toString().toLowerCase();
-                  final race  = (b['race'] ?? '').toString().toLowerCase();
-                  final rfid  = (b['tag_rfid'] ?? '').toString().toLowerCase();
-                  return nom.contains(query) ||
-                         race.contains(query) ||
-                         rfid.contains(query);
+                  final nom  = (b['nom']  ?? '').toString().toLowerCase();
+                  final race = (b['race'] ?? '').toString().toLowerCase();
+                  final rfid = (b['tag_rfid'] ?? '').toString().toLowerCase();
+                  return nom.contains(query) || race.contains(query) || rfid.contains(query);
                 });
               },
-
-              // Rendu de chaque suggestion dans la liste déroulante
               optionsViewBuilder: (context, onSelected, options) {
                 return Align(
                   alignment: Alignment.topLeft,
@@ -1152,10 +1053,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                           padding    : EdgeInsets.zero,
                           shrinkWrap : true,
                           itemCount  : options.length,
-                          separatorBuilder: (_, __) => Divider(
-                            height: 1,
-                            color : Colors.grey.shade200,
-                          ),
+                          separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey.shade200),
                           itemBuilder: (ctx, index) {
                             final belier = options.elementAt(index);
                             final estSelectionne =
@@ -1164,14 +1062,10 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                             return InkWell(
                               onTap: () => onSelected(belier),
                               child: Container(
-                                color  : estSelectionne
-                                    ? Colors.blue.shade50
-                                    : Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 8),
+                                color  : estSelectionne ? Colors.blue.shade50 : Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                 child: Row(
                                   children: [
-                                    // ── Photo ou icône ──────
                                     _buildAnimalAvatar(
                                       imageUrl    : belier['image_url'],
                                       fallbackIcon: Icons.male,
@@ -1179,41 +1073,28 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                                       radius      : 22,
                                     ),
                                     const SizedBox(width: 12),
-                                    // ── Nom + race ──────────
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
+                                        crossAxisAlignment: CrossAxisAlignment.start,
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Text(
-                                            belier['nom'] ?? '—',
+                                          Text(belier['nom'] ?? '—',
                                             style: TextStyle(
                                               fontSize  : 14,
-                                              fontWeight: estSelectionne
-                                                  ? FontWeight.bold
-                                                  : FontWeight.w500,
+                                              fontWeight: estSelectionne ? FontWeight.bold : FontWeight.w500,
                                             ),
                                           ),
-                                          if ((belier['race'] ?? '')
-                                              .isNotEmpty) ...[
+                                          if ((belier['race'] ?? '').isNotEmpty) ...[
                                             const SizedBox(height: 2),
-                                            Text(
-                                              belier['race'],
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color   : Colors.grey.shade600,
-                                              ),
+                                            Text(belier['race'],
+                                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                                             ),
                                           ],
                                         ],
                                       ),
                                     ),
-                                    // ── Coche si sélectionné ─
                                     if (estSelectionne)
-                                      Icon(Icons.check_circle,
-                                          color: Colors.blue.shade700,
-                                          size : 20),
+                                      Icon(Icons.check_circle, color: Colors.blue.shade700, size: 20),
                                   ],
                                 ),
                               ),
@@ -1225,23 +1106,15 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                   ),
                 );
               },
-
-              // Champ de saisie
-              fieldViewBuilder: (
-                context,
-                textEditingController,
-                focusNode,
-                onFieldSubmitted,
-              ) {
+              fieldViewBuilder: (context, textEditingController, focusNode, onFieldSubmitted) {
                 return TextFormField(
                   controller: textEditingController,
                   focusNode : focusNode,
                   decoration: InputDecoration(
-                    border     : const OutlineInputBorder(),
-                    hintText   : 'Chercher ou saisir le nom du bélier...',
-                    prefixIcon : Icon(Icons.search,
-                        color: Colors.blue.shade700),
-                    suffixIcon : _belierSelectionne != null
+                    border    : const OutlineInputBorder(),
+                    hintText  : 'Chercher ou saisir le nom du bélier...',
+                    prefixIcon: Icon(Icons.search, color: Colors.blue.shade700),
+                    suffixIcon: _belierSelectionne != null
                         ? IconButton(
                             icon    : const Icon(Icons.clear, size: 18),
                             tooltip : 'Effacer',
@@ -1256,12 +1129,9 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                         : null,
                   ),
                   onFieldSubmitted: (_) => onFieldSubmitted(),
-                  validator: (_) =>
-                      _belierSelectionne == null ? 'Champ requis' : null,
+                  validator: (_) => _belierSelectionne == null ? 'Champ requis' : null,
                 );
               },
-
-              // Quand l'utilisateur sélectionne une suggestion
               onSelected: (belier) {
                 setState(() {
                   _belierSelectionne = belier;
@@ -1269,13 +1139,10 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                 });
               },
             ),
-
-            // Bandeau récapitulatif du bélier sélectionné
             if (_belierSelectionne != null) ...[
               const SizedBox(height: 8),
               Container(
-                padding   : const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 8),
+                padding   : const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color       : Colors.blue.shade50,
                   borderRadius: BorderRadius.circular(8),
@@ -1283,8 +1150,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.check_circle,
-                        color: Colors.blue.shade700, size: 18),
+                    Icon(Icons.check_circle, color: Colors.blue.shade700, size: 18),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -1307,11 +1173,11 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       ),
     );
   }
-
+ 
   Widget _buildSectionAnalyseIA() {
     final deuxSelectionnes =
         _brebisSelectionnee != null && _belierSelectionne != null;
-
+ 
     Color couleurBord;
     if (_resultatIa == null) {
       couleurBord = Colors.purple.shade200;
@@ -1322,7 +1188,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
     } else {
       couleurBord = Colors.red;
     }
-
+ 
     return Card(
       elevation: 2,
       shape    : RoundedRectangleBorder(
@@ -1334,7 +1200,6 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
         child  : Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Titre
             Row(
               children: [
                 Container(
@@ -1343,31 +1208,23 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                     color       : Colors.purple.shade50,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(Icons.psychology,
-                      color: Colors.purple, size: 24),
+                  child: const Icon(Icons.psychology, color: Colors.purple, size: 24),
                 ),
                 const SizedBox(width: 10),
                 const Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Analyse IA — Consanguinité',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        'Détecte les risques génétiques avant accouplement',
-                        style: TextStyle(fontSize: 11, color: Colors.grey),
-                      ),
+                      Text('Analyse IA — Consanguinité',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      Text('Détecte les risques génétiques avant accouplement',
+                          style: TextStyle(fontSize: 11, color: Colors.grey)),
                     ],
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-
-            // Bouton analyser
             if (!_analyseEffectuee || _resultatIa?.estErreur == true)
               SizedBox(
                 width: double.infinity,
@@ -1379,10 +1236,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                       ? const SizedBox(
                           width : 18,
                           height: 18,
-                          child : CircularProgressIndicator(
-                            color      : Colors.white,
-                            strokeWidth: 2,
-                          ),
+                          child : CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                         )
                       : const Icon(Icons.biotech),
                   label: Text(
@@ -1397,14 +1251,10 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                     backgroundColor: Colors.purple,
                     foregroundColor: Colors.white,
                     padding        : const EdgeInsets.symmetric(vertical: 12),
-                    shape          : RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+                    shape          : RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
               ),
-
-            // Résultat IA
             if (_resultatIa != null && !_resultatIa!.estErreur) ...[
               const SizedBox(height: 12),
               ResultatConsanguiniteWidget(
@@ -1427,8 +1277,6 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                 ),
               ),
             ],
-
-            // Message erreur
             if (_resultatIa != null && _resultatIa!.estErreur) ...[
               const SizedBox(height: 8),
               Container(
@@ -1439,8 +1287,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
                 ),
                 child: Text(
                   _resultatIa!.message,
-                  style: TextStyle(
-                      fontSize: 12, color: Colors.grey.shade600),
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                 ),
               ),
             ],
@@ -1449,12 +1296,11 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       ),
     );
   }
-
+ 
   Widget _buildDatePicker() {
     return Card(
       child: ListTile(
-        leading : Icon(Icons.calendar_today,
-            color: Color(ReproductionConfig.colorSecondary)),
+        leading : Icon(Icons.calendar_today, color: Color(ReproductionConfig.colorSecondary)),
         title   : const Text('Date d\'accouplement'),
         subtitle: Text(_formatDate(_dateAccouplement)),
         trailing: const Icon(Icons.chevron_right),
@@ -1470,37 +1316,29 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       ),
     );
   }
-
+ 
   Widget _buildTimePicker() {
     return Card(
       child: ListTile(
-        leading : Icon(Icons.access_time,
-            color: Color(ReproductionConfig.colorSecondary)),
+        leading : Icon(Icons.access_time, color: Color(ReproductionConfig.colorSecondary)),
         title   : const Text('Heure'),
-        subtitle: Text(
-          '${_heureAccouplement.hour}h'
-          '${_heureAccouplement.minute.toString().padLeft(2, '0')}',
-        ),
+        subtitle: Text('${_heureAccouplement.hour}h${_heureAccouplement.minute.toString().padLeft(2, '0')}'),
         trailing: const Icon(Icons.chevron_right),
         onTap   : () async {
-          final t = await showTimePicker(
-            context    : context,
-            initialTime: _heureAccouplement,
-          );
+          final t = await showTimePicker(context: context, initialTime: _heureAccouplement);
           if (t != null && mounted) setState(() => _heureAccouplement = t);
         },
       ),
     );
   }
-
+ 
   Widget _buildMethodeDropdown() {
     return DropdownButtonFormField<String>(
       value     : _methodeAccouplement,
       decoration: InputDecoration(
         labelText  : 'Méthode d\'accouplement',
         border     : const OutlineInputBorder(),
-        prefixIcon : Icon(Icons.sync,
-            color: Color(ReproductionConfig.colorSecondary)),
+        prefixIcon : Icon(Icons.sync, color: Color(ReproductionConfig.colorSecondary)),
       ),
       items: const [
         DropdownMenuItem(value: 'Naturel', child: Text('Naturel')),
@@ -1512,7 +1350,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       onChanged: (v) => setState(() => _methodeAccouplement = v!),
     );
   }
-
+ 
   Widget _buildNotesField() {
     return TextFormField(
       controller: _notesController,
@@ -1521,21 +1359,16 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
         labelText : 'Notes (optionnel)',
         hintText  : 'Observations...',
         border    : const OutlineInputBorder(),
-        prefixIcon: Icon(Icons.notes,
-            color: Color(ReproductionConfig.colorSecondary)),
+        prefixIcon: Icon(Icons.notes, color: Color(ReproductionConfig.colorSecondary)),
       ),
     );
   }
-
+ 
   Widget _buildSubmitButton() {
-    final estRisque   = _resultatIa != null && _resultatIa!.estRisque;
-    final couleur     = estRisque
-        ? Colors.orange
-        : Color(ReproductionConfig.colorSecondary);
-    final label       = estRisque
-        ? 'Enregistrer malgré le risque'
-        : 'Enregistrer l\'accouplement';
-
+    final estRisque = _resultatIa != null && _resultatIa!.estRisque;
+    final couleur   = estRisque ? Colors.orange : Color(ReproductionConfig.colorSecondary);
+    final label     = estRisque ? 'Enregistrer malgré le risque' : 'Enregistrer l\'accouplement';
+ 
     return SizedBox(
       width : double.infinity,
       height: 52,
@@ -1545,8 +1378,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
             ? const SizedBox(
                 width : 20,
                 height: 20,
-                child : CircularProgressIndicator(
-                    color: Colors.white, strokeWidth: 2),
+                child : CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
               )
             : const Icon(Icons.check_circle),
         label: Text(

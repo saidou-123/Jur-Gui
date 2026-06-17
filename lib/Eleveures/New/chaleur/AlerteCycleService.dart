@@ -1,36 +1,38 @@
 // ============================================================
-// SERVICE ALERTES CYCLES ANORMAUX — Jur-Gui 4.0
+// SERVICE ALERTES CYCLES ANORMAUX — Jur-Gui 4.0 CORRIGÉ
 // Fichier: lib/Eleveures/New/chaleur/AlerteCycleService.dart
 //
-// Détecte automatiquement :
-//   • Cycle court  : < 14 jours entre deux chaleurs
-//   • Cycle long   : > 21 jours entre deux chaleurs
-//   • Absence      : > 21 jours sans chaleur (via pg_cron)
-// Et suggère une consultation vétérinaire
+// ✅ CORRECTION : alerte.type.name retournait 'cycleCourt' (camelCase Dart)
+//    mais la BD a une contrainte CHECK qui attend 'cycle_court' (snake_case).
+//
+//    SOLUTION : ajout d'un getter `valeurBD` sur TypeAlerteCycle qui convertit
+//    le nom Dart en snake_case attendu par Supabase.
+//    Tous les endroits qui utilisaient alerte.type.name pour la BD
+//    utilisent maintenant alerte.type.valeurBD.
+//    Les usages non-BD (debugPrint, notifications push) gardent .name.
 // ============================================================
-
+ 
 import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+ 
 class AlerteCycleService {
   static final AlerteCycleService _instance = AlerteCycleService._internal();
   factory AlerteCycleService() => _instance;
   AlerteCycleService._internal();
-
+ 
   final supabase = Supabase.instance.client;
   final _notif = NotificationService();
-
+ 
   // ── Seuils (jours) ──────────────────────────────────────
-  static const int seuilCycleCourt   = 14;
-  static const int seuilCycleLong    = 21;
-  static const int seuilAbsence      = 21;
-
+  static const int seuilCycleCourt = 14;
+  static const int seuilCycleLong  = 21;
+  static const int seuilAbsence    = 21;
+ 
   // ============================================================
   // ANALYSER LE CYCLE À L'ENREGISTREMENT D'UNE CHALEUR
-  // Appelé depuis EnrChaleurPageAmelioree après insertion
   // ============================================================
-
+ 
   Future<ResultatAnalyseCycle> analyserCycle({
     required dynamic animalId,
     required String source,
@@ -40,8 +42,7 @@ class AlerteCycleService {
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) return ResultatAnalyseCycle.normal();
-
-      // Récupérer la chaleur précédente
+ 
       final precedente = await supabase
           .from('chaleurs')
           .select('date_chaleur')
@@ -51,17 +52,17 @@ class AlerteCycleService {
           .order('date_chaleur', ascending: false)
           .limit(1)
           .maybeSingle();
-
+ 
       if (precedente == null) {
         debugPrint('ℹ️ Première chaleur enregistrée pour $nomAnimal');
         return ResultatAnalyseCycle.normal();
       }
-
-      final datePrecedente = DateTime.parse(precedente['date_chaleur']);
+ 
+      final datePrecedente  = DateTime.parse(precedente['date_chaleur']);
       final intervalleJours = nouvelleChaleur.difference(datePrecedente).inDays;
-
+ 
       debugPrint('📊 Intervalle cycle $nomAnimal: $intervalleJours jours');
-
+ 
       // ── Cycle court ────────────────────────────────────────
       if (intervalleJours < seuilCycleCourt) {
         final alerte = ResultatAnalyseCycle(
@@ -81,7 +82,7 @@ class AlerteCycleService {
         await _envoyerNotificationAlerte(alerte, animalId, source, userId);
         return alerte;
       }
-
+ 
       // ── Cycle long ─────────────────────────────────────────
       if (intervalleJours > seuilCycleLong) {
         final alerte = ResultatAnalyseCycle(
@@ -101,22 +102,20 @@ class AlerteCycleService {
         await _envoyerNotificationAlerte(alerte, animalId, source, userId);
         return alerte;
       }
-
-      // ── Cycle normal ───────────────────────────────────────
+ 
       debugPrint('✅ Cycle normal pour $nomAnimal: $intervalleJours jours');
       return ResultatAnalyseCycle.normal();
-
+ 
     } catch (e) {
       debugPrint('❌ Erreur analyse cycle: $e');
       return ResultatAnalyseCycle.normal();
     }
   }
-
+ 
   // ============================================================
   // VÉRIFIER L'ABSENCE DE CHALEURS (> 21 JOURS)
-  // Appelé au chargement de la page ou via pg_cron
   // ============================================================
-
+ 
   Future<List<ResultatAnalyseCycle>> verifierAbsenceChaleurs({
     required dynamic animalId,
     required String source,
@@ -125,8 +124,7 @@ class AlerteCycleService {
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) return [];
-
-      // Dernière chaleur enregistrée
+ 
       final derniere = await supabase
           .from('chaleurs')
           .select('date_chaleur')
@@ -135,8 +133,7 @@ class AlerteCycleService {
           .order('date_chaleur', ascending: false)
           .limit(1)
           .maybeSingle();
-
-      // Vérifier si pas en gestation
+ 
       final enGestation = await supabase
           .from('accouplements')
           .select('id')
@@ -145,45 +142,38 @@ class AlerteCycleService {
           .isFilter('date_mise_bas', null)
           .limit(1)
           .maybeSingle();
-
-      // Si en gestation → pas d'alerte
+ 
       if (enGestation != null) {
         debugPrint('ℹ️ $nomAnimal est en gestation — pas d\'alerte absence');
         return [];
       }
-
-      // Calculer jours depuis dernière chaleur
-      int joursDepuis;
-      if (derniere == null) {
-        // Jamais de chaleur enregistrée — pas d'alerte (données insuffisantes)
-        return [];
-      } else {
-        final dateDerniere = DateTime.parse(derniere['date_chaleur']);
-        joursDepuis = DateTime.now().difference(dateDerniere).inDays;
-      }
-
+ 
+      if (derniere == null) return [];
+ 
+      final dateDerniere = DateTime.parse(derniere['date_chaleur']);
+      final joursDepuis  = DateTime.now().difference(dateDerniere).inDays;
+ 
       if (joursDepuis <= seuilAbsence) return [];
-
-      // Vérifier si une alerte récente existe déjà (éviter doublons)
+ 
+      // ✅ Requête avec valeurBD (snake_case) pour le filtre BD
       final alerteRecente = await supabase
           .from('alertes_cycle')
           .select('id, created_at')
           .eq('animal_id', animalId.toString())
-          .eq('type_alerte', 'absence_chaleurs')
+          .eq('type_alerte', TypeAlerteCycle.absenceChaleurs.valeurBD)
           .eq('statut', 'active')
           .gte('created_at',
               DateTime.now().subtract(const Duration(days: 3)).toIso8601String())
           .maybeSingle();
-
+ 
       if (alerteRecente != null) {
         debugPrint('ℹ️ Alerte absence récente déjà envoyée pour $nomAnimal');
         return [];
       }
-
-      // Détecter anœstrus saisonnier (juin-août)
+ 
       final moisActuel = DateTime.now().month;
       final estAnoestrus = moisActuel >= 6 && moisActuel <= 8;
-
+ 
       final alerte = ResultatAnalyseCycle(
         type: estAnoestrus
             ? TypeAlerteCycle.anoestrus
@@ -202,24 +192,24 @@ class AlerteCycleService {
                 'nutritionnel. Une consultation vétérinaire est fortement recommandée.',
         nomAnimal: nomAnimal,
       );
-
+ 
       await _enregistrerAlerte(
         userId: userId, animalId: animalId, source: source,
         nomAnimal: nomAnimal, alerte: alerte,
       );
       await _envoyerNotificationAlerte(alerte, animalId, source, userId);
-
+ 
       return [alerte];
     } catch (e) {
       debugPrint('❌ Erreur vérification absence chaleurs: $e');
       return [];
     }
   }
-
+ 
   // ============================================================
   // RÉCUPÉRER LES ALERTES ACTIVES D'UN ANIMAL
   // ============================================================
-
+ 
   Future<List<Map<String, dynamic>>> getAlertesActives({
     required dynamic animalId,
     required String source,
@@ -227,7 +217,7 @@ class AlerteCycleService {
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) return [];
-
+ 
       final alertes = await supabase
           .from('alertes_cycle')
           .select('*')
@@ -235,18 +225,18 @@ class AlerteCycleService {
           .eq('animal_id', animalId.toString())
           .eq('statut', 'active')
           .order('created_at', ascending: false);
-
+ 
       return List<Map<String, dynamic>>.from(alertes);
     } catch (e) {
       debugPrint('❌ Erreur récupération alertes: $e');
       return [];
     }
   }
-
+ 
   // ============================================================
   // MARQUER UNE ALERTE COMME VUE OU RÉSOLUE
   // ============================================================
-
+ 
   Future<void> marquerAlerte({
     required String alerteId,
     required String statut, // 'vue' ou 'resolue'
@@ -261,11 +251,13 @@ class AlerteCycleService {
       debugPrint('❌ Erreur mise à jour alerte: $e');
     }
   }
-
+ 
   // ============================================================
   // PRIVÉ — Enregistrer alerte en BD
+  // ✅ CORRECTION : utilise alerte.type.valeurBD (snake_case)
+  //    au lieu de alerte.type.name (camelCase Dart)
   // ============================================================
-
+ 
   Future<void> _enregistrerAlerte({
     required String userId,
     required dynamic animalId,
@@ -279,37 +271,37 @@ class AlerteCycleService {
         'animal_id'       : animalId.toString(),
         'source'          : source,
         'nom_animal'      : nomAnimal,
-        'type_alerte'     : alerte.type.name,
+        // ✅ CORRECTION : valeurBD = 'cycle_court' au lieu de 'cycleCourt'
+        'type_alerte'     : alerte.type.valeurBD,
         'intervalle_jours': alerte.intervalleJours,
         'message'         : alerte.message,
         'suggestion'      : alerte.suggestion,
         'statut'          : 'active',
         'date_alerte'     : DateTime.now().toIso8601String(),
       });
-      debugPrint('✅ Alerte cycle enregistrée en BD: ${alerte.type.name}');
+      debugPrint('✅ Alerte cycle enregistrée en BD: ${alerte.type.valeurBD}');
     } catch (e) {
       debugPrint('❌ Erreur enregistrement alerte: $e');
     }
   }
-
+ 
   // ============================================================
   // PRIVÉ — Envoyer notification push + locale
+  // Note : pour les notifications, on garde .name (lisible en log)
   // ============================================================
-
+ 
   Future<void> _envoyerNotificationAlerte(
     ResultatAnalyseCycle alerte,
     dynamic animalId,
     String source,
     String userId,
   ) async {
-    // Notification locale immédiate
     await _notif.afficherNotificationImmediateLocal(
       titre: alerte.titreNotification,
       corps: alerte.message,
-      type: alerte.type.name,
+      type : alerte.type.name,
     );
-
-    // Push distant programmé (dans 5 minutes pour laisser le temps de lire)
+ 
     final dateEnvoi = DateTime.now().add(const Duration(minutes: 5));
     await supabase.from('notifications_programmees').insert({
       'user_id'   : userId,
@@ -327,30 +319,64 @@ class AlerteCycleService {
         'priorite' : alerte.type == TypeAlerteCycle.absenceChaleurs ? 'haute' : 'normale',
       },
     });
-
+ 
     debugPrint('✅ Notification alerte cycle envoyée: ${alerte.type.name}');
   }
 }
-
+ 
 // ============================================================
 // MODÈLES
 // ============================================================
-
+ 
 enum TypeAlerteCycle {
   cycleCourt,
   cycleLong,
   absenceChaleurs,
   anoestrus,
-  normal,
+  normal;
+ 
+  // ✅ CORRECTION : getter qui retourne la valeur snake_case
+  // attendue par la contrainte CHECK de Supabase.
+  // Dart .name = 'cycleCourt'  →  .valeurBD = 'cycle_court'
+  String get valeurBD {
+    switch (this) {
+      case TypeAlerteCycle.cycleCourt:
+        return 'cycle_court';
+      case TypeAlerteCycle.cycleLong:
+        return 'cycle_long';
+      case TypeAlerteCycle.absenceChaleurs:
+        return 'absence_chaleurs';
+      case TypeAlerteCycle.anoestrus:
+        return 'anoestrus';
+      case TypeAlerteCycle.normal:
+        return 'normal';
+    }
+  }
+ 
+  // Reconstruction depuis la valeur BD (pour lecture)
+  static TypeAlerteCycle fromBD(String? valeur) {
+    switch (valeur) {
+      case 'cycle_court':
+        return TypeAlerteCycle.cycleCourt;
+      case 'cycle_long':
+        return TypeAlerteCycle.cycleLong;
+      case 'absence_chaleurs':
+        return TypeAlerteCycle.absenceChaleurs;
+      case 'anoestrus':
+        return TypeAlerteCycle.anoestrus;
+      default:
+        return TypeAlerteCycle.normal;
+    }
+  }
 }
-
+ 
 class ResultatAnalyseCycle {
   final TypeAlerteCycle type;
   final int? intervalleJours;
   final String message;
   final String suggestion;
   final String nomAnimal;
-
+ 
   const ResultatAnalyseCycle({
     required this.type,
     this.intervalleJours,
@@ -358,17 +384,17 @@ class ResultatAnalyseCycle {
     required this.suggestion,
     required this.nomAnimal,
   });
-
+ 
   factory ResultatAnalyseCycle.normal() => const ResultatAnalyseCycle(
-        type       : TypeAlerteCycle.normal,
-        message    : '',
-        suggestion : '',
-        nomAnimal  : '',
+        type      : TypeAlerteCycle.normal,
+        message   : '',
+        suggestion: '',
+        nomAnimal : '',
       );
-
+ 
   bool get estNormal => type == TypeAlerteCycle.normal;
   bool get estUrgent => type == TypeAlerteCycle.absenceChaleurs;
-
+ 
   String get titreNotification {
     switch (type) {
       case TypeAlerteCycle.cycleCourt:
@@ -383,7 +409,7 @@ class ResultatAnalyseCycle {
         return '';
     }
   }
-
+ 
   Color get couleur {
     switch (type) {
       case TypeAlerteCycle.cycleCourt:
@@ -398,7 +424,7 @@ class ResultatAnalyseCycle {
         return Colors.green;
     }
   }
-
+ 
   IconData get icone {
     switch (type) {
       case TypeAlerteCycle.cycleCourt:
@@ -414,3 +440,4 @@ class ResultatAnalyseCycle {
     }
   }
 }
+ 

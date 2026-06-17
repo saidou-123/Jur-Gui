@@ -6,7 +6,6 @@
 import 'package:depart/Eleveures/Ajouter%20Animal/AjouterAnimal.dart';
 import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDBluetooth.dart';
 import 'package:depart/Eleveures/New/Accouplemt/Accouplement..dart';
-import 'package:depart/Eleveures/New/Accouplemt/ConsanguiniteService.dart';
 import 'package:depart/Eleveures/New/Notification/NotificationsViewPage.dart';
 import 'package:depart/Eleveures/New/chaleur/ChaleurModule.dart';
 import 'package:depart/Eleveures/New/genealogique/ArbreGenealogique.dart';
@@ -289,7 +288,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
       case 1:
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const MonTroupeau()),
+          MaterialPageRoute(builder: (_) => const  MonTroupeau()),
         ).then((_) => setState(() => _selectedIndex = 0));
         break;
       case 2:
@@ -436,9 +435,9 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               label: "Accueil",
             ),
             BottomNavigationBarItem(
-              icon: _navIcon(Icons.pets_outlined, 1),
-              activeIcon: _navIconActive(Icons.pets, 1),
-              label: "Troupeau",
+              icon: _navIcon(Icons.scanner, 1),
+              activeIcon: _navIconActive(Icons.scanner, 1),
+              label: "Partage",
             ),
             BottomNavigationBarItem(
               icon: _navIcon(Icons.add_circle_outline, 2),

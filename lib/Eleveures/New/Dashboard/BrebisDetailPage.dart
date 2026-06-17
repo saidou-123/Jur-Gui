@@ -4,6 +4,10 @@
 // Affiche: Historique chaleurs, accouplements, agnelages
 // ============================================================
 
+import 'package:depart/Eleveures/New/Accouplemt/ChecklistGestationPage.dart';
+import 'package:depart/Eleveures/New/Accouplemt/DeclarationMiseBasPage.dart';
+import 'package:depart/Eleveures/New/Accouplemt/PreparationMiseBasPage.dart';
+import 'package:depart/Eleveures/New/Accouplemt/SuiviGestationService.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -54,6 +58,12 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
   DateTime? _derniereChaleur;
   DateTime? _prochaineeChaleurEstimee;
   DateTime? _dateAgnelagePrevu;
+
+  // ★ ÉTAPE 6+7 — Suivi gestation
+  Map<String, dynamic>? _gestationCourante;
+  double _scoreGestation    = 0.65;
+  int    _semaineGestation  = 1;
+  bool   _gestationConfirmee = false;
 
   // ===== TOUCHE GRAPHIQUES =====
   int _touchedBarIndex = -1;
@@ -645,49 +655,159 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
   }
 
   Widget _buildAlerteAgnelage() {
-    final jours = _dateAgnelagePrevu!.difference(DateTime.now()).inDays;
-    final urgent = jours <= 7;
+    final jours   = _dateAgnelagePrevu!.difference(DateTime.now()).inDays;
+    final urgent  = jours <= 7;
+    final depasse = jours < 0;
+    final couleur = urgent ? _couleurChaleur : _couleurAccouplement;
+
+    // Score couleur
+    Color couleurScore;
+    if (_scoreGestation >= 0.80)      couleurScore = const Color(0xFF2E7D32);
+    else if (_scoreGestation >= 0.60) couleurScore = Colors.orange;
+    else                              couleurScore = const Color(0xFFE53935);
+
+    // Label compte à rebours pour le bouton (pas const car variable)
+    final labelJours = depasse ? 'J0+' : 'J-$jours';
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
+      margin    : const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: urgent
-            ? Colors.red.shade50
-            : Colors.purple.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: urgent ? _couleurChaleur : _couleurAccouplement,
-          width: 1.5,
-        ),
+        color       : urgent ? Colors.red.shade50 : Colors.purple.shade50,
+        borderRadius: BorderRadius.circular(14),
+        border      : Border.all(color: couleur, width: 1.5),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Icon(
-            urgent
-                ? Icons.warning_amber_rounded
-                : Icons.pregnant_woman_rounded,
-            color: urgent ? _couleurChaleur : _couleurAccouplement,
-            size: 28,
+          // En-tête
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+            child: Row(
+              children: [
+                Icon(
+                  depasse
+                      ? Icons.baby_changing_station_rounded
+                      : urgent ? Icons.warning_amber_rounded
+                               : Icons.pregnant_woman_rounded,
+                  color: couleur, size: 26,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        depasse
+                            ? '🚨 Mise bas imminente !'
+                            : urgent
+                                ? '⚠️ Agnelage dans $jours jour${jours > 1 ? 's' : ''}'
+                                : '🤰 Gestation — $jours jours restants',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14, color: couleur),
+                      ),
+                      Text(
+                        'Date prévue : ${_formatDate(_dateAgnelagePrevu!)}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
+
+          // Barre score gestation (étape 6)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  urgent ? '⚠️ Agnelage imminent !' : '📅 Agnelage prévu',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                    color: urgent ? _couleurChaleur : _couleurAccouplement,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Probabilité gestation — S$_semaineGestation',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: couleurScore.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '${(_scoreGestation * 100).round()}%'
+                        '${_gestationConfirmee ? ' ✅' : ''}',
+                        style: TextStyle(
+                          fontSize: 11, fontWeight: FontWeight.bold,
+                          color: couleurScore),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 5),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: _scoreGestation,
+                    backgroundColor: Colors.grey.shade200,
+                    valueColor: AlwaysStoppedAnimation<Color>(couleurScore),
+                    minHeight: 7,
                   ),
                 ),
-                Text(
-                  jours <= 0
-                      ? 'Prévu aujourd\'hui ou dépassé'
-                      : 'Dans $jours jour${jours > 1 ? 's' : ''} · ${_formatDate(_dateAgnelagePrevu!)}',
-                  style:
-                      TextStyle(fontSize: 12, color: Colors.grey[700]),
+              ],
+            ),
+          ),
+
+          // 3 boutons (étapes 6, 7, 8)
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                // Checklist gestation (étape 6)
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _ouvrirChecklistGestation,
+                    icon : const Icon(Icons.checklist_rounded, size: 14),
+                    label: Text('S$_semaineGestation',
+                        style: const TextStyle(fontSize: 12)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _couleurAccouplement,
+                      side: BorderSide(color: _couleurAccouplement),
+                      padding: const EdgeInsets.symmetric(vertical: 7),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                // Compte à rebours (étape 7) — labelJours n'est PAS const
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _ouvrirPreparationMiseBas,
+                    icon : const Icon(Icons.timer_rounded, size: 14),
+                    label: Text(labelJours,
+                        style: const TextStyle(fontSize: 12)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: couleur,
+                      side: BorderSide(color: couleur),
+                      padding: const EdgeInsets.symmetric(vertical: 7),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                // Déclaration mise bas (étape 8)
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _ouvrirDeclarationMiseBas,
+                    icon : const Icon(Icons.baby_changing_station_rounded, size: 14),
+                    label: const Text('Mise bas',
+                        style: TextStyle(fontSize: 12)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 7),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -695,6 +815,64 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
         ],
       ),
     );
+  }
+
+  // ★ ÉTAPE 6 : Checklist gestation
+  Future<void> _ouvrirChecklistGestation() async {
+    if (_gestationCourante == null) return;
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChecklistGestationPage(
+          accouplement: _gestationCourante!,
+          brebis      : widget.brebis,
+        ),
+      ),
+    );
+    if (result == true && mounted) _chargerDonnees();
+  }
+
+  // ★ ÉTAPE 7 : Préparation mise bas
+  Future<void> _ouvrirPreparationMiseBas() async {
+    final accouplement = _accouplements
+        .where((a) => a['date_mise_bas'] == null)
+        .firstOrNull;
+    if (accouplement == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PreparationMiseBasPage(
+          accouplement: accouplement,
+          brebis      : widget.brebis,
+        ),
+      ),
+    );
+  }
+
+  // ★ ÉTAPE 8 : Déclaration mise bas
+  Future<void> _ouvrirDeclarationMiseBas() async {
+    final accouplement = _accouplements
+        .where((a) => a['date_mise_bas'] == null)
+        .firstOrNull;
+    if (accouplement == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Aucun accouplement en cours trouvé'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DeclarationMiseBasPage(
+          accouplement: accouplement,
+          brebis      : widget.brebis,
+        ),
+      ),
+    );
+    if (result == true && mounted) _chargerDonnees();
   }
 
   Widget _buildProchaineChaleur() {
@@ -1397,14 +1575,16 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
                 ],
               ),
               const SizedBox(height: 6),
-              Row(
-                children: [
+              // ✅ FIX overflow : Wrap évite le débordement sur textes longs
+              Wrap(
+                spacing   : 8,
+                runSpacing: 4,
+                children  : [
                   _chip(Icons.sync_rounded, methode, Colors.grey.shade400),
-                  const SizedBox(width: 8),
                   if (dateAgnelage != null)
                     _chip(
                       Icons.calendar_today_rounded,
-                      'Agnelage prévu: ${_formatDate(dateAgnelage)}',
+                      'Agnelage: ${_formatDate(dateAgnelage)}',
                       reussi ? _couleurAgnelage : _couleurAccouplement,
                     ),
                 ],
@@ -1644,13 +1824,24 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
   }
 
   Widget _chip(IconData icon, String label, Color color) {
+    // ✅ FIX overflow : Flexible + ellipsis pour textes longs
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, size: 13, color: color),
         const SizedBox(width: 4),
-        Text(label,
-            style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w500)),
+        Flexible(
+          child: Text(
+            label,
+            overflow  : TextOverflow.ellipsis,
+            maxLines  : 1,
+            style     : TextStyle(
+              fontSize    : 11,
+              color       : color,
+              fontWeight  : FontWeight.w500,
+            ),
+          ),
+        ),
       ],
     );
   }

@@ -1,3 +1,9 @@
+// ============================================================
+// MAIN.DART — VERSION ÉTAPE 5
+// ★ Routes retour_chaleur_j17 / j21 / non_fecondee / gestation_suspectee
+//   ajoutées dans _naviguerDepuisNotification()
+// ============================================================
+ 
 import 'package:depart/AlertesPage.dart';
 import 'package:depart/Eleveures/New/Accouplemt/Accouplement..dart';
 import 'package:depart/Eleveures/New/Notification/NotificationIdManager.dart';
@@ -6,125 +12,159 @@ import 'package:depart/Eleveures/New/chaleur/ChaleurModule.dart';
 import 'package:depart/pages/Bienvenue/acceuil.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'; 
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
  
-// Handler arriere-plan FCM
+// ============================================================
+// HANDLER ARRIÈRE-PLAN FCM
+// Doit rester au top-level (exigence Firebase)
+// ============================================================
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  debugPrint('Message arriere-plan: ${message.notification?.title}');
+  debugPrint('Message arrière-plan: ${message.notification?.title}');
 }
  
 // ============================================================
-// MAIN
+// MAIN — optimisé pour éviter les frames sautées au démarrage
 // ============================================================
- 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
  
-  // 1. Chargement .env — AVANT toute initialisation
+  // ── ÉTAPE 1 : bloquant strict (nécessaire avant runApp) ───
   await dotenv.load(fileName: '.env');
-  debugPrint('Variables environnement chargees');
+  debugPrint('✅ .env chargé');
  
-  // 2. Timezones
-  tz.initializeTimeZones();
-  try {
-    final dynamic tzInfo = await FlutterTimezone.getLocalTimezone();
-    final String localTimezoneName =
-        tzInfo is String ? tzInfo : (tzInfo.name as String);
-    tz.setLocalLocation(tz.getLocation(localTimezoneName));
-    debugPrint('Timezone locale: $localTimezoneName');
-  } catch (e) {
-    tz.setLocalLocation(tz.UTC);
-    debugPrint('Timezone non detectee — fallback UTC: $e');
-  }
- 
-  // 3. Supabase — cles depuis .env
   await Supabase.initialize(
     url    : dotenv.env['SUPABASE_URL']      ?? '',
     anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
   );
-  debugPrint('Supabase initialise');
+  debugPrint('✅ Supabase initialisé');
  
-  // 4. Firebase
   await Firebase.initializeApp();
-  debugPrint('Firebase initialise');
+  debugPrint('✅ Firebase initialisé');
  
-  // 5. Handler arriere-plan FCM
+  // ── ÉTAPE 2 : lancer l'app IMMÉDIATEMENT ─────────────────
+  runApp(const MyApp());
+ 
+  // ── ÉTAPE 3 : initialisations secondaires EN PARALLÈLE ───
+  unawaited(_initSecondaire());
+}
+ 
+/// Toutes les initialisations non bloquantes pour l'affichage.
+Future<void> _initSecondaire() async {
+    // 3a. Timezones — extraction robuste sur tous les appareils Android
+  // flutter_timezone peut retourner :
+  //   • Une String  : "Africa/Dakar"  (appareils normaux)
+  //   • Un objet    : "TimezoneInfo(Africa/Dakar, (locale: fr_FR, ...))"
+  // On extrait uniquement le nom IANA dans les deux cas.
+  try {
+    tz.initializeTimeZones(); // synchrone, garanti avant getLocation()
+    final dynamic tzInfo = await FlutterTimezone.getLocalTimezone();
+    String tzName = tzInfo.toString();
+    // Extraire le nom IANA si format "TimezoneInfo(Africa/Dakar, ...)"
+    final regexTzInfo = RegExp(r'TimezoneInfo\(([^,)]+)');
+    final match = regexTzInfo.firstMatch(tzName);
+    if (match != null) tzName = match.group(1)!.trim();
+    if (tzName.isEmpty) tzName = 'UTC';
+    tz.setLocalLocation(tz.getLocation(tzName));
+    debugPrint('✅ Timezone: $tzName');
+  } catch (e) {
+    tz.setLocalLocation(tz.UTC);
+    debugPrint('⚠️ Timezone fallback UTC: $e');
+  } catch (e) {
+    tz.setLocalLocation(tz.UTC);
+    debugPrint('⚠️ Timezone fallback UTC: $e');
+  }
+ 
+  // 3b. Handler FCM arrière-plan
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
  
-  // 6. Permissions notifications
-  await FirebaseMessaging.instance.requestPermission(
-    alert: true,
-    badge: true,
-    sound: true,
-  );
+  // 3c. Permission notifications
+  try {
+    await FirebaseMessaging.instance.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+    debugPrint('✅ Permissions notifications accordées');
+  } catch (e) {
+    debugPrint('⚠️ Permissions notifications: $e');
+  }
  
-  // 7. NotificationIdManager persistant
+  // 3d. NotificationIdManager
   try {
     await NotificationIdManager().initialize();
-    debugPrint('NotificationIdManager: ${NotificationIdManager().count} IDs restaures');
+    debugPrint('✅ NotificationIdManager: ${NotificationIdManager().count} IDs');
   } catch (e) {
-    debugPrint('NotificationIdManager init: $e');
+    debugPrint('⚠️ NotificationIdManager: $e');
   }
  
-  // 8. Notifications locales
+  // 3e. NotificationService (local notifications)
   try {
     await NotificationService().initialize();
-    debugPrint('NotificationService initialise');
+    debugPrint('✅ NotificationService initialisé');
   } catch (e, stack) {
-    debugPrint('Erreur NotificationService: $e\n$stack');
+    debugPrint('⚠️ NotificationService: $e\n$stack');
   }
  
-  // 9. Auth listener — token FCM + clear IDs au logout
+  // 3f. Listeners FCM
+  _initFCMListeners();
+ 
+  debugPrint('✅ Toutes initialisations secondaires terminées');
+}
+ 
+ 
+/// Listeners FCM — toujours enregistrés après Firebase.initializeApp()
+void _initFCMListeners() {
+  // Auth listener — token FCM + clear IDs au logout
   Supabase.instance.client.auth.onAuthStateChange.listen((data) async {
     final session = data.session;
     final event   = data.event;
  
     if (event == AuthChangeEvent.signedIn && session != null) {
-      debugPrint('Connecte: ${session.user.email}');
+      debugPrint('🔐 Connecté: ${session.user.email}');
       try {
-        final fcmToken = await FirebaseMessaging.instance.getToken();
-        if (fcmToken != null) {
-          await NotificationService().saveFcmToken(fcmToken);
-          debugPrint('Token FCM enregistre');
+        final token = await FirebaseMessaging.instance.getToken();
+        if (token != null) {
+          await NotificationService().saveFcmToken(token);
+          debugPrint('✅ Token FCM enregistré');
         }
       } catch (e) {
-        debugPrint('Erreur token FCM: $e');
+        debugPrint('⚠️ Token FCM: $e');
       }
     }
  
     if (event == AuthChangeEvent.signedOut) {
-      debugPrint('Deconnexion');
       await NotificationIdManager().clear();
-      debugPrint('Registre notifications vide');
+      debugPrint('🔓 Déconnexion — registre notifications vidé');
     }
   });
  
-  // 10. Token FCM refresh
+  // Renouvellement token FCM
   FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-    debugPrint('Token FCM renouvele');
     try {
       await NotificationService().saveFcmToken(newToken);
+      debugPrint('🔄 Token FCM renouvelé');
     } catch (e) {
-      debugPrint('Erreur refresh token FCM: $e');
+      debugPrint('⚠️ Refresh token FCM: $e');
     }
   });
  
-  // 11. Messages foreground (app ouverte)
-  // FCM n'affiche pas la notification automatiquement en foreground
-  // on l'affiche manuellement via NotificationService
+  // Messages foreground (app ouverte)
   FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-    debugPrint('Message foreground: ${message.notification?.title}');
-    final type = message.data['type'] ?? 'general';
+    debugPrint('📩 Message foreground: ${message.notification?.title}');
+    final type    = message.data['type'] ?? 'general';
+    // ★ ÉTAPE 5 : types retour chaleur considérés comme urgents
     final urgente = type.contains('alerte') ||
                     type.contains('cycle')  ||
-                    type.contains('consultation');
+                    type.contains('consultation') ||
+                    type == 'retour_chaleur_j21';
     await NotificationService().afficherNotificationImmediateLocal(
       titre  : message.notification?.title ?? 'Jur-Gui',
       corps  : message.notification?.body  ?? '',
@@ -133,37 +173,45 @@ void main() async {
     );
   });
  
-  // 12. Clic sur notification (app en arriere-plan)
+  // Clic sur notification (app en arrière-plan)
   FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-    debugPrint('Notification cliquee: ${message.data}');
+    debugPrint('👆 Notification cliquée: ${message.data}');
     _naviguerDepuisNotification(message.data);
   });
  
-  // 13. App lancee depuis notification (app etait fermee)
-  final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
-  if (initialMessage != null) {
-    debugPrint('App ouverte depuis notification: ${initialMessage.data}');
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _naviguerDepuisNotification(initialMessage.data);
-    });
-  }
- 
-  runApp(const MyApp());
+  // App lancée depuis notification (app était fermée)
+  FirebaseMessaging.instance.getInitialMessage().then((message) {
+    if (message != null) {
+      debugPrint('🚀 App ouverte depuis notification: ${message.data}');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _naviguerDepuisNotification(message.data);
+      });
+    }
+  });
 }
  
-// Navigation centralisee depuis notification
+// ============================================================
+// NAVIGATION DEPUIS NOTIFICATION
+// ★ ÉTAPE 5 : routes retour_chaleur_j17/j21/non_fecondee/
+//             gestation_suspectee ajoutées
+// ============================================================
 void _naviguerDepuisNotification(Map<String, dynamic> data) {
   final type = data['type'] ?? '';
+  final nav  = NotificationService().navigatorKey.currentState;
  
-  if (type.contains('chaleur')   ||
-      type.contains('fenetre')   ||
+  if (type.contains('chaleur')              ||
+      type.contains('fenetre')              ||
       type.contains('preparation_accouplement') ||
       type.contains('derniere_chance')          ||
-      type.contains('j15_sans_gestation')) {
-    NotificationService().navigatorKey.currentState?.pushNamed('/chaleur');
+      type.contains('j15_sans_gestation')       ||
+      type == 'retour_chaleur_j17'              || // ★ ÉTAPE 5
+      type == 'retour_chaleur_j21'              || // ★ ÉTAPE 5
+      type == 'non_fecondee'                    || // ★ ÉTAPE 5
+      type == 'gestation_suspectee') {             // ★ ÉTAPE 5
+    nav?.pushNamed('/chaleur');
  
   } else if (type.contains('agnelage')) {
-    NotificationService().navigatorKey.currentState?.pushNamed(
+    nav?.pushNamed(
       '/accouplements',
       arguments: {
         'source'          : data['source'],
@@ -175,25 +223,58 @@ void _naviguerDepuisNotification(Map<String, dynamic> data) {
   } else if (type.contains('cycle')  ||
              type.contains('alerte') ||
              type.contains('consultation')) {
-    NotificationService().navigatorKey.currentState?.pushNamed('/sante');
+    nav?.pushNamed('/sante');
   }
 }
  
 // ============================================================
 // APP
 // ============================================================
- 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
  
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      navigatorKey: NotificationService().navigatorKey,
-      color       : Colors.white,
-      title       : 'Jur-Gui',
-      home        : const Acceuil(),
+      navigatorKey              : NotificationService().navigatorKey,
+      color                     : Colors.white,
+      title                     : 'Jur-Gui',
+      home                      : const Acceuil(),
       debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        colorSchemeSeed         : const Color(0xFF1B5E20),
+        useMaterial3            : true,
+        scaffoldBackgroundColor : Colors.grey[50],
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.white,
+          foregroundColor: Color(0xFF1B5E20),
+          elevation      : 2,
+          centerTitle    : true,
+          titleTextStyle : TextStyle(
+            color     : Color(0xFF1B5E20),
+            fontSize  : 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF1B5E20),
+            foregroundColor: Colors.white,
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+            ),
+          ),
+        ),
+        inputDecorationTheme: const InputDecorationTheme(
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(12)),
+            borderSide  : BorderSide(color: Color(0xFF1B5E20), width: 2),
+          ),
+        ),
+      ),
       routes: {
         '/chaleur': (context) => const ChaleurModule(),
  
@@ -206,9 +287,18 @@ class MyApp extends StatelessWidget {
           return EnregistrerAccouplement();
         },
  
-        // CORRECTION BUG 2 : vraie page sante (plus de TODO)
         '/sante': (context) => const AlertesPage(),
       },
     );
   }
 }
+ 
+// ============================================================
+// HELPER — fire and forget sans warning lint
+// ============================================================
+void unawaited(Future<void> future) {
+  future.catchError((dynamic e) {
+    debugPrint('⚠️ unawaited error: $e');
+  });
+}
+ 

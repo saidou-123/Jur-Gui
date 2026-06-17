@@ -454,6 +454,88 @@ class NotificationService {
   // ANNULER N3 SI ACCOUPLEMENT ENREGISTRÉ
   // ============================================================
  
+ 
+  // ============================================================
+  // ★ ÉTAPE 5 — SURVEILLANCE RETOUR CHALEUR J+17 ET J+21
+  // ============================================================
+ 
+  Future<void> planifierNotificationRetourChaleur({
+    required dynamic  brebisId,
+    required String   nomBrebis,
+    required String   source,
+    required dynamic  accouplementId,
+    required DateTime dateJ17,
+    required DateTime dateJ21,
+  }) async {
+    try {
+      // Notification J+17
+      final idJ17 = await _idManager.getOrCreate('retour_chaleur_j17', brebisId);
+      if (dateJ17.isAfter(DateTime.now())) {
+        await _scheduleNotification(
+          id           : idJ17,
+          title        : '👁️ Surveiller $nomBrebis',
+          body         : 'J+17 depuis l\'accouplement. Observez les signes de retour en chaleur.',
+          scheduledDate: dateJ17,
+          payload      : _encodePayload({
+            'type'            : 'retour_chaleur_j17',
+            'source'          : source,
+            'brebis_id'       : brebisId.toString(),
+            'accouplement_id' : accouplementId.toString(),
+          }),
+        );
+        await _enregistrerRappelBD(
+          type: 'retour_chaleur_j17', animalId: brebisId, source: source,
+          dateRappel: dateJ17,
+          message: 'Début surveillance retour en chaleur — $nomBrebis',
+          metadata: {'accouplement_id': accouplementId.toString()},
+        );
+        await _programmerPushDistant(
+          type: 'retour_chaleur_j17',
+          titre: '👁️ Surveillance chaleur — $nomBrebis',
+          corps: 'J+17 atteint. Surveillez les signes de retour en chaleur.',
+          animalId: brebisId.toString(), source: source, nomAnimal: nomBrebis,
+          dateEnvoi: dateJ17,
+          metadata: {'accouplement_id': accouplementId.toString()},
+        );
+      }
+ 
+      // Notification J+21
+      final idJ21 = await _idManager.getOrCreate('retour_chaleur_j21', brebisId);
+      if (dateJ21.isAfter(DateTime.now())) {
+        await _scheduleNotification(
+          id           : idJ21,
+          title        : '❓ Contrôle J+21 — $nomBrebis',
+          body         : 'Avez-vous observé un retour en chaleur ? Répondez pour mettre à jour le statut.',
+          scheduledDate: dateJ21,
+          payload      : _encodePayload({
+            'type'            : 'retour_chaleur_j21',
+            'source'          : source,
+            'brebis_id'       : brebisId.toString(),
+            'accouplement_id' : accouplementId.toString(),
+          }),
+        );
+        await _enregistrerRappelBD(
+          type: 'retour_chaleur_j21', animalId: brebisId, source: source,
+          dateRappel: dateJ21,
+          message: 'Question J+21 retour en chaleur — $nomBrebis',
+          metadata: {'accouplement_id': accouplementId.toString()},
+        );
+        await _programmerPushDistant(
+          type: 'retour_chaleur_j21',
+          titre: '❓ J+21 — Retour en chaleur $nomBrebis ?',
+          corps: 'Ouvrez l\'application pour répondre et mettre à jour le statut.',
+          animalId: brebisId.toString(), source: source, nomAnimal: nomBrebis,
+          dateEnvoi: dateJ21,
+          metadata: {'accouplement_id': accouplementId.toString()},
+        );
+      }
+ 
+      debugPrint('✅ Notifications retour chaleur planifiées pour $nomBrebis');
+    } catch (e) {
+      debugPrint('❌ planifierNotificationRetourChaleur: $e');
+    }
+  }
+ 
   Future<void> annulerAlerteDerniereChance({
     required dynamic brebisId,
     required String source,
@@ -582,16 +664,23 @@ class NotificationService {
     required dynamic accouplementId,
   }) async {
     try {
+      // ★ ÉTAPE 7 : 5 paliers J-30, J-15, J-7, J-3, J-1
       final rappels = [
         (ReproductionConfig.rappel1MoisAvantJours,
-         '📅 Agnelage dans 1 mois',
-         '$nomBrebis devrait agneler dans environ 30 jours. Préparez le matériel.'),
+         '📅 J-30 Agnelage dans 1 mois — $nomBrebis',
+         'Préparez la loge d\'agnelage. Isolez la brebis et vérifiez l\'alimentation.'),
+        (ReproductionConfig.rappel15JoursAvantJours,
+         '🔧 J-15 Agnelage dans 15 jours — $nomBrebis',
+         'Vérifiez le matériel d\'agnelage. Ajustez la ration alimentaire.'),
         (ReproductionConfig.rappel1SemaineAvantJours,
-         '⚠️ Agnelage dans 1 semaine',
-         '$nomBrebis devrait agneler dans 7 jours. Surveillance accrue recommandée.'),
+         '👁️ J-7 Agnelage dans 1 semaine — $nomBrebis',
+         'Surveillance quotidienne. Vérifiez mamelles et comportement chaque jour.'),
+        (ReproductionConfig.rappel3JoursAvantJours,
+         '⏰ J-3 Agnelage dans 3 jours — $nomBrebis',
+         'Présence renforcée. Vérifiez toutes les 4h, y compris la nuit.'),
         (ReproductionConfig.rappel24hAvantJours,
-         '🚨 Agnelage imminent',
-         '$nomBrebis devrait agneler dans les prochaines 24h. Surveillez-la de près.'),
+         '🚨 J-1 Agnelage imminent — $nomBrebis',
+         'Surveillance permanente obligatoire. Vétérinaire prévenu ?'),
       ];
  
       for (final (jours, titre, corps) in rappels) {
@@ -703,9 +792,12 @@ class NotificationService {
     try {
       final userId = supabase.auth.currentUser?.id;
  
+      // ★ ÉTAPE 7 : 5 clés dans l'annulation
       final agnelageKeys = [
         'agnelage_${ReproductionConfig.rappel1MoisAvantJours}j',
+        'agnelage_${ReproductionConfig.rappel15JoursAvantJours}j',
         'agnelage_${ReproductionConfig.rappel1SemaineAvantJours}j',
+        'agnelage_${ReproductionConfig.rappel3JoursAvantJours}j',
         'agnelage_${ReproductionConfig.rappel24hAvantJours}j',
       ];
  
