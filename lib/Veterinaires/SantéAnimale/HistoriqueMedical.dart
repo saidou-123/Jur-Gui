@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ============================================================
-// HISTORIQUE MÉDICAL — version synchronisée avec Supabase
+// HISTORIQUE MÉDICAL VÉTÉRINAIRE — filtrage sécurisé
+// Correction : chaque vétérinaire ne voit QUE ses propres actes
 // ============================================================
 class HistoriqueMedical extends StatefulWidget {
   const HistoriqueMedical({super.key});
@@ -15,32 +16,50 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
   final supabase = Supabase.instance.client;
   List<Map<String, dynamic>> _historique = [];
   bool _isLoading = true;
-
-  // ✅ CORRIGÉ : valeurs en minuscule pour matcher item['type']
   String _filtre = 'tout';
+
+  // ✅ SÉCURITÉ : ID du vétérinaire connecté, récupéré une seule fois
+  String? _veterinaireId;
 
   @override
   void initState() {
     super.initState();
+    _veterinaireId = supabase.auth.currentUser?.id;
     _chargerHistorique();
   }
 
   Future<void> _chargerHistorique() async {
     if (!mounted) return;
+
+    // ✅ SÉCURITÉ : vérifier que le vétérinaire est bien connecté
+    if (_veterinaireId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ Session expirée. Veuillez vous reconnecter.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
       List<Map<String, dynamic>> historique = [];
 
-      // ✅ Charger consultations depuis Supabase
-      final consultations =
-          await supabase.from('consultations').select('*').order(
-                'date_consultation',
-                ascending: false,
-              );
+      // ✅ SÉCURITÉ CORRIGÉE : filtre strict par veterinaire_id
+      // Avant : .select('*') sans filtre → exposait TOUS les dossiers
+      // Après : .eq('veterinaire_id', _veterinaireId!) → seulement ses actes
+      final consultations = await supabase
+          .from('consultations')
+          .select('*')
+          .eq('veterinaire_id', _veterinaireId!)
+          .order('date_consultation', ascending: false);
 
       for (var c in consultations) {
-        // Récupérer le nom de l'animal selon la source
         final nomAnimal =
             await _getNomAnimal(c['animal_id']?.toString(), c['source']);
         historique.add({
@@ -55,12 +74,12 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
         });
       }
 
-      // ✅ Charger vaccinations depuis Supabase
-      final vaccinations =
-          await supabase.from('vaccinations').select('*').order(
-                'date_vaccination',
-                ascending: false,
-              );
+      // ✅ SÉCURITÉ CORRIGÉE : filtre strict par veterinaire_id
+      final vaccinations = await supabase
+          .from('vaccinations')
+          .select('*')
+          .eq('veterinaire_id', _veterinaireId!)
+          .order('date_vaccination', ascending: false);
 
       for (var v in vaccinations) {
         final nomAnimal =
@@ -97,15 +116,22 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
       }
     } catch (e) {
       debugPrint('❌ Erreur chargement historique: $e');
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Erreur: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
   Future<String> _getNomAnimal(String? animalId, String? source) async {
     if (animalId == null || source == null) return 'Animal inconnu';
     try {
-      final table =
-          source == 'nee' ? 'nouveaux_nee' : 'animal_acheter';
+      final table = source == 'nee' ? 'nouveaux_nee' : 'animal_acheter';
       final result = await supabase
           .from(table)
           .select('nom')
@@ -117,12 +143,9 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
     }
   }
 
-  // ✅ CORRIGÉ : filtre en minuscule, correspondance exacte avec item['type']
   List<Map<String, dynamic>> get _historiqueFiltre {
     if (_filtre == 'tout') return _historique;
-    return _historique
-        .where((item) => item['type'] == _filtre)
-        .toList();
+    return _historique.where((item) => item['type'] == _filtre).toList();
   }
 
   @override
@@ -132,6 +155,17 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
         title: const Text('Historique Médical'),
         backgroundColor: Colors.orange[700],
         actions: [
+          // ✅ Affiche le nombre total d'actes dans le titre
+          if (!_isLoading)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  '${_historique.length} acte(s)',
+                  style: const TextStyle(fontSize: 13, color: Colors.white70),
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _chargerHistorique,
@@ -140,6 +174,28 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
       ),
       body: Column(
         children: [
+          // ✅ Bannière de sécurité : confirme le contexte filtré
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: Colors.orange[50],
+            child: Row(
+              children: [
+                Icon(Icons.verified_user, color: Colors.orange[700], size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '🔒 Affichage limité à vos actes médicaux uniquement',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.orange[900],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
           _buildFilterChips(),
           Expanded(
             child: _isLoading
@@ -163,7 +219,6 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
   }
 
   Widget _buildFilterChips() {
-    // ✅ CORRIGÉ : valeurs en minuscule pour correspondre à item['type']
     final filtres = [
       {'label': 'Tout', 'value': 'tout'},
       {'label': 'Consultations', 'value': 'consultation'},
@@ -182,8 +237,7 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
               child: FilterChip(
                 label: Text(f['label']!),
                 selected: isSelected,
-                onSelected: (_) =>
-                    setState(() => _filtre = f['value']!),
+                onSelected: (_) => setState(() => _filtre = f['value']!),
                 selectedColor: Colors.orange[200],
                 checkmarkColor: Colors.orange[900],
               ),
@@ -194,8 +248,7 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
     );
   }
 
-  Widget _buildHistoriqueItem(
-      Map<String, dynamic> item, int index) {
+  Widget _buildHistoriqueItem(Map<String, dynamic> item, int index) {
     Color couleur;
     IconData icone;
 
@@ -225,7 +278,6 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Icône + ligne verticale
               Column(
                 children: [
                   Container(
@@ -233,11 +285,9 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
                     decoration: BoxDecoration(
                       color: couleur.withOpacity(0.1),
                       shape: BoxShape.circle,
-                      border:
-                          Border.all(color: couleur, width: 2),
+                      border: Border.all(color: couleur, width: 2),
                     ),
-                    child:
-                        Icon(icone, color: couleur, size: 24),
+                    child: Icon(icone, color: couleur, size: 24),
                   ),
                   if (!isLast)
                     Container(
@@ -252,8 +302,7 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      mainAxisAlignment:
-                          MainAxisAlignment.spaceBetween,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
                           _formatDate(item['date']),
@@ -267,8 +316,7 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
                               horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
                             color: couleur.withOpacity(0.1),
-                            borderRadius:
-                                BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
                             item['type'].toString().toUpperCase(),
@@ -284,20 +332,17 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
                     Text(
                       item['titre'],
                       style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold),
+                          fontSize: 15, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 4),
                     Text('🐑 ${item['animal_nom']}',
                         style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[700])),
+                            fontSize: 14, color: Colors.grey[700])),
                     const SizedBox(height: 4),
                     Text(
                       item['description'],
-                      style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey[600]),
+                      style:
+                          TextStyle(fontSize: 13, color: Colors.grey[600]),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -337,7 +382,7 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
           Text(
             _filtre != 'tout'
                 ? 'Essayez un autre filtre'
-                : 'Les actes médicaux apparaîtront ici',
+                : 'Vos actes médicaux apparaîtront ici',
             style: TextStyle(fontSize: 14, color: Colors.grey[500]),
           ),
         ],
@@ -372,8 +417,8 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
             Icon(icone, color: couleur),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(item['titre'],
-                  style: const TextStyle(fontSize: 16)),
+              child:
+                  Text(item['titre'], style: const TextStyle(fontSize: 16)),
             ),
           ],
         ),
@@ -384,10 +429,8 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
             children: [
               _buildDetailRow(
                   'Date', _formatDate(item['date']), Icons.calendar_today),
-              _buildDetailRow(
-                  'Animal', item['animal_nom'], Icons.pets),
-              _buildDetailRow(
-                  'Type', item['type'], icone),
+              _buildDetailRow('Animal', item['animal_nom'], Icons.pets),
+              _buildDetailRow('Type', item['type'], icone),
               if (item['type'] == 'consultation') ...[
                 if (details['motif'] != null)
                   _buildDetailRow(
@@ -402,15 +445,19 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
                   _buildDetailRow('Température',
                       '${details['temperature_c']} °C', Icons.thermostat),
                 if (details['poids_kg'] != null)
-                  _buildDetailRow('Poids',
-                      '${details['poids_kg']} kg', Icons.monitor_weight),
+                  _buildDetailRow(
+                      'Poids', '${details['poids_kg']} kg', Icons.monitor_weight),
+                if (details['frequence_cardiaque'] != null)
+                  _buildDetailRow('Fréq. cardiaque',
+                      '${details['frequence_cardiaque']} bpm', Icons.favorite),
               ],
               if (item['type'] == 'vaccination') ...[
                 if (details['nom_vaccin'] != null)
                   _buildDetailRow(
                       'Vaccin', details['nom_vaccin'], Icons.vaccines),
                 if (item['date_rappel'] != null)
-                  _buildDetailRow('Rappel prévu',
+                  _buildDetailRow(
+                      'Rappel prévu',
                       _formatDate(item['date_rappel'].toString()),
                       Icons.event_repeat),
                 if (details['lot'] != null)
@@ -455,8 +502,7 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
                 const SizedBox(height: 2),
                 Text(value,
                     style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600)),
+                        fontSize: 14, fontWeight: FontWeight.w600)),
               ],
             ),
           ),

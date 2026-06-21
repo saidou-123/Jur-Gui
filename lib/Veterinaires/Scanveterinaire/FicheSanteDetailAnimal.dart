@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'NouvelleConsultationPage.dart';
-import 'NouvelleVaccinationPage.dart';
+
+// ✅ CORRECTION : imports avec 'show' pour éviter tout conflit
+// Chaque import expose uniquement la classe dont on a besoin
+import 'package:depart/Veterinaires/Scanveterinaire/NouvelleConsultationPage.dart'
+    show NouvelleConsultationPage;
+import 'package:depart/Veterinaires/Scanveterinaire/NouvelleVaccinationPage.dart'
+    show NouvelleVaccinationPage;
 
 // ============================================================
 // FICHE DE SANTÉ DÉTAILLÉE — version synchronisée
+// ✅ Fix import : préfixes consultation. et vaccination.
+//    pour éviter l'ambiguïté de noms entre les deux fichiers
 // ============================================================
 class FicheSanteDetailAnimal extends StatefulWidget {
   final Map<String, dynamic> animal;
@@ -40,7 +47,6 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
     try {
       final animalId = widget.animal['id']?.toString() ?? '';
 
-      // ✅ Vraies requêtes Supabase
       final consultations = await supabase
           .from('consultations')
           .select('*')
@@ -57,10 +63,8 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
 
       if (mounted) {
         setState(() {
-          _consultations =
-              List<Map<String, dynamic>>.from(consultations);
-          _vaccinations =
-              List<Map<String, dynamic>>.from(vaccinations);
+          _consultations = List<Map<String, dynamic>>.from(consultations);
+          _vaccinations = List<Map<String, dynamic>>.from(vaccinations);
           _isLoading = false;
         });
       }
@@ -74,9 +78,9 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title:
-            Text('Fiche — ${widget.animal['nom'] ?? 'Animal'}'),
+        title: Text('Fiche — ${widget.animal['nom'] ?? 'Animal'}'),
         backgroundColor: Colors.green[700],
+        foregroundColor: Colors.white,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -102,7 +106,7 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
                 ],
               ),
             ),
-      // ✅ FAB avec menu pour consultation ET vaccination
+      // ✅ FAB avec préfixes corrects
       floatingActionButton: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -155,8 +159,8 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Informations Générales',
-                style: TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold)),
+                style:
+                    TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             if (widget.animal['image_url'] != null)
               Center(
@@ -176,15 +180,20 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
                 ),
               ),
             const SizedBox(height: 16),
-            _buildInfoRow(Icons.pets, 'Nom', widget.animal['nom'] ?? 'N/A'),
             _buildInfoRow(
-                Icons.agriculture, 'Race', widget.animal['race'] ?? 'N/A'),
-            _buildInfoRow(Icons.wc, 'Sexe', widget.animal['sexe'] ?? 'N/A'),
+                Icons.pets, 'Nom', widget.animal['nom'] ?? 'N/A'),
+            _buildInfoRow(Icons.agriculture, 'Race',
+                widget.animal['race'] ?? 'N/A'),
             _buildInfoRow(
-                Icons.nfc, 'Tag RFID', widget.animal['tag_rfid'] ?? 'N/A'),
+                Icons.wc, 'Sexe', widget.animal['sexe'] ?? 'N/A'),
+            _buildInfoRow(Icons.nfc, 'Tag RFID',
+                widget.animal['tag_rfid'] ?? 'N/A'),
             if (widget.animal['date_naissance'] != null)
-              _buildInfoRow(Icons.cake, 'Date naissance',
-                  _formatDate(widget.animal['date_naissance'].toString())),
+              _buildInfoRow(
+                  Icons.cake,
+                  'Date naissance',
+                  _formatDate(
+                      widget.animal['date_naissance'].toString())),
             if (widget.animal['provenance'] != null)
               _buildInfoRow(Icons.location_on, 'Provenance',
                   widget.animal['provenance']),
@@ -220,8 +229,11 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildStatItem(Icons.medical_services,
-                    '${_consultations.length}', 'Consultation(s)', Colors.green),
+                _buildStatItem(
+                    Icons.medical_services,
+                    '${_consultations.length}',
+                    'Consultation(s)',
+                    Colors.green),
                 _buildStatItem(Icons.vaccines, '${_vaccinations.length}',
                     'Vaccination(s)', Colors.blue),
               ],
@@ -252,8 +264,7 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
                 fontWeight: FontWeight.bold,
                 color: color)),
         Text(label,
-            style:
-                TextStyle(fontSize: 12, color: Colors.grey[600])),
+            style: TextStyle(fontSize: 12, color: Colors.grey[600])),
       ],
     );
   }
@@ -355,16 +366,17 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Text('Consultation',
-                    style:
-                        TextStyle(color: Colors.white, fontSize: 10)),
+                    style: TextStyle(color: Colors.white, fontSize: 10)),
               ),
             ],
           ),
           const SizedBox(height: 6),
           Text('Motif: ${c['motif'] ?? 'N/A'}'),
-          if (c['diagnostic'] != null && c['diagnostic'].toString().isNotEmpty)
+          if (c['diagnostic'] != null &&
+              c['diagnostic'].toString().isNotEmpty)
             Text('Diagnostic: ${c['diagnostic']}'),
-          if (c['traitement'] != null && c['traitement'].toString().isNotEmpty)
+          if (c['traitement'] != null &&
+              c['traitement'].toString().isNotEmpty)
             Text('Traitement: ${c['traitement']}'),
           if (c['examen_clinique'] != null &&
               c['examen_clinique'].toString().isNotEmpty)
@@ -372,17 +384,18 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
           if (c['temperature_c'] != null)
             Text('Température: ${c['temperature_c']} °C',
                 style: const TextStyle(color: Colors.orange)),
-          if (c['poids_kg'] != null)
-            Text('Poids: ${c['poids_kg']} kg'),
+          if (c['poids_kg'] != null) Text('Poids: ${c['poids_kg']} kg'),
         ],
       ),
     );
   }
 
   Widget _buildVaccinationItem(Map<String, dynamic> v) {
-    final rappelDate =
-        v['date_rappel'] != null ? _formatDate(v['date_rappel'].toString()) : null;
-    final bool rappelProche = _isRappelProche(v['date_rappel']?.toString());
+    final rappelDate = v['date_rappel'] != null
+        ? _formatDate(v['date_rappel'].toString())
+        : null;
+    final bool rappelProche =
+        _isRappelProche(v['date_rappel']?.toString());
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -402,7 +415,8 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
             children: [
               Text(
                 '💉 ${v['nom_vaccin'] ?? 'Vaccin'}',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 15),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(
@@ -412,14 +426,12 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Text('Vaccination',
-                    style:
-                        TextStyle(color: Colors.white, fontSize: 10)),
+                    style: TextStyle(color: Colors.white, fontSize: 10)),
               ),
             ],
           ),
           const SizedBox(height: 6),
-          Text(
-              'Date: ${_formatDate(v['date_vaccination']?.toString() ?? '')}'),
+          Text('Date: ${_formatDate(v['date_vaccination']?.toString() ?? '')}'),
           if (rappelDate != null)
             Text(
               'Rappel: $rappelDate${rappelProche ? ' ⚠️' : ''}',
@@ -429,8 +441,7 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
             ),
           if (v['lot'] != null && v['lot'].toString().isNotEmpty)
             Text('Lot: ${v['lot']}',
-                style:
-                    TextStyle(fontSize: 12, color: Colors.grey[600])),
+                style: TextStyle(fontSize: 12, color: Colors.grey[600])),
           if (v['observations'] != null &&
               v['observations'].toString().isNotEmpty)
             Text('Notes: ${v['observations']}'),
@@ -447,8 +458,7 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
           Icon(icon, size: 20, color: Colors.green),
           const SizedBox(width: 8),
           Text('$label: ',
-              style:
-                  const TextStyle(fontWeight: FontWeight.bold)),
+              style: const TextStyle(fontWeight: FontWeight.bold)),
           Expanded(
               child: Text(value, overflow: TextOverflow.ellipsis)),
         ],

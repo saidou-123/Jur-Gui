@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ============================================================
-// NOUVELLE CONSULTATION — version synchronisée
+// NOUVELLE CONSULTATION
+// ✅ ÉTAPE 3 : Notification automatique à l'éleveur après enregistrement
 // ============================================================
 class NouvelleConsultationPage extends StatefulWidget {
   final Map<String, dynamic> animal;
@@ -50,18 +51,84 @@ class _NouvelleConsultationPageState
     super.dispose();
   }
 
+  // ─────────────────────────────────────────────────────────
+  // ✅ NOUVEAU : Récupérer l'ID de l'éleveur propriétaire
+  // pour lui envoyer la notification
+  // ─────────────────────────────────────────────────────────
+  Future<String?> _getEleveurId() async {
+    try {
+      final table =
+          widget.source == 'nee' ? 'nouveaux_nee' : 'animal_acheter';
+      final result = await supabase
+          .from(table)
+          .select('user_id')
+          .eq('id', widget.animal['id'])
+          .maybeSingle();
+      return result?['user_id']?.toString();
+    } catch (e) {
+      debugPrint('❌ Erreur récupération éleveur: $e');
+      return null;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // ✅ NOUVEAU : Envoyer une notification à l'éleveur
+  // Insère dans la table notifications (créée en étape 3)
+  // ─────────────────────────────────────────────────────────
+  Future<void> _notifierEleveur({
+    required String eleveurId,
+    required String veterinaireId,
+    required String nomAnimal,
+    required String motif,
+  }) async {
+    try {
+      // Récupérer le nom du vétérinaire
+      final vetData = await supabase
+          .from('users')
+          .select('nom_complet, prenom, nom')
+          .eq('id', veterinaireId)
+          .maybeSingle();
+
+      String nomVet = 'Dr. Inconnu';
+      if (vetData != null) {
+        nomVet = vetData['nom_complet'] ??
+            ((vetData['prenom'] != null && vetData['nom'] != null)
+                ? '${vetData['prenom']} ${vetData['nom']}'
+                : 'Dr. Inconnu');
+      }
+
+      await supabase.from('notifications').insert({
+        'destinataire_id': eleveurId,
+        'expediteur_id': veterinaireId,
+        'type': 'nouvelle_consultation',
+        'titre': '🩺 Consultation enregistrée pour $nomAnimal',
+        'corps':
+            '$nomVet a effectué une consultation.\nMotif : $motif\nConsultez l\'historique médical pour les détails.',
+        'animal_id': widget.animal['id'].toString(),
+        'animal_source': widget.source,
+        'lu': false,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      debugPrint('✅ Notification envoyée à l\'éleveur $eleveurId');
+    } catch (e) {
+      // La notification échoue silencieusement : ne pas bloquer l'enregistrement
+      debugPrint('⚠️ Notification non envoyée: $e');
+    }
+  }
+
   Future<void> _enregistrerConsultation() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
 
     try {
-      // ✅ Vérification session avant insertion
       final veterinaire = supabase.auth.currentUser;
       if (veterinaire == null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('❌ Session expirée. Veuillez vous reconnecter.'),
+              content:
+                  Text('❌ Session expirée. Veuillez vous reconnecter.'),
               backgroundColor: Colors.red,
             ),
           );
@@ -78,7 +145,6 @@ class _NouvelleConsultationPageState
         _heureConsultation.minute,
       );
 
-      // ✅ Champs alignés avec la table consultations de Supabase
       final Map<String, dynamic> data = {
         'animal_id': widget.animal['id'],
         'source': widget.source,
@@ -93,7 +159,6 @@ class _NouvelleConsultationPageState
         'updated_at': DateTime.now().toIso8601String(),
       };
 
-      // Champs optionnels numériques
       if (_temperatureController.text.isNotEmpty) {
         data['temperature_c'] =
             double.tryParse(_temperatureController.text.trim());
@@ -107,13 +172,27 @@ class _NouvelleConsultationPageState
             int.tryParse(_fcController.text.trim());
       }
 
+      // 1. Enregistrer la consultation
       await supabase.from('consultations').insert(data);
+
+      // 2. ✅ NOUVEAU : Notifier l'éleveur en arrière-plan
+      final eleveurId = await _getEleveurId();
+      if (eleveurId != null) {
+        await _notifierEleveur(
+          eleveurId: eleveurId,
+          veterinaireId: veterinaire.id,
+          nomAnimal: widget.animal['nom'] ?? 'votre animal',
+          motif: _motifController.text.trim(),
+        );
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('✅ Consultation enregistrée avec succès'),
+            content: Text(
+                '✅ Consultation enregistrée — l\'éleveur a été notifié'),
             backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
           ),
         );
         Navigator.pop(context, true);
@@ -139,6 +218,7 @@ class _NouvelleConsultationPageState
       appBar: AppBar(
         title: const Text('Nouvelle Consultation'),
         backgroundColor: Colors.green[700],
+        foregroundColor: Colors.white,
       ),
       body: _isLoading
           ? const Center(
@@ -147,7 +227,7 @@ class _NouvelleConsultationPageState
                 children: [
                   CircularProgressIndicator(),
                   SizedBox(height: 16),
-                  Text('Enregistrement en cours...'),
+                  Text('Enregistrement et notification en cours...'),
                 ],
               ),
             )
@@ -159,12 +239,38 @@ class _NouvelleConsultationPageState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildAnimalInfo(),
+                    const SizedBox(height: 16),
+
+                    // ✅ Bandeau info notification
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.green[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.notifications_active,
+                              color: Colors.green[700], size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'L\'éleveur sera automatiquement notifié après l\'enregistrement',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.green[900]),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     const SizedBox(height: 24),
+
                     const Text('Informations de consultation',
                         style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold)),
+                            fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 16),
+
                     Row(
                       children: [
                         Expanded(child: _buildDatePicker()),
@@ -173,10 +279,16 @@ class _NouvelleConsultationPageState
                       ],
                     ),
                     const SizedBox(height: 16),
-                    _buildTextField(_motifController, 'Motif de consultation *',
-                        'Ex: Contrôle de routine, boiterie...', Icons.comment,
-                        maxLines: 2, required: true),
+
+                    _buildTextField(
+                        _motifController,
+                        'Motif de consultation *',
+                        'Ex: Contrôle de routine, boiterie...',
+                        Icons.comment,
+                        maxLines: 2,
+                        required: true),
                     const SizedBox(height: 16),
+
                     _buildTextField(
                         _examenController,
                         'Examen clinique *',
@@ -185,22 +297,30 @@ class _NouvelleConsultationPageState
                         maxLines: 4,
                         required: true),
                     const SizedBox(height: 16),
-                    _buildTextField(_diagnosticController, 'Diagnostic *',
-                        'Diagnostic posé suite à l\'examen', Icons.assignment,
-                        maxLines: 3, required: true),
-                    const SizedBox(height: 16),
-                    _buildTextField(_traitementController,
-                        'Traitement prescrit *',
-                        'Médicaments, posologie, durée...', Icons.medication,
-                        maxLines: 4, required: true),
+
+                    _buildTextField(
+                        _diagnosticController,
+                        'Diagnostic *',
+                        'Diagnostic posé suite à l\'examen',
+                        Icons.assignment,
+                        maxLines: 3,
+                        required: true),
                     const SizedBox(height: 16),
 
-                    // ✅ Champs numériques alignés avec la table Supabase
+                    _buildTextField(
+                        _traitementController,
+                        'Traitement prescrit *',
+                        'Médicaments, posologie, durée...',
+                        Icons.medication,
+                        maxLines: 4,
+                        required: true),
+                    const SizedBox(height: 16),
+
                     const Text('Paramètres vitaux (optionnel)',
                         style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold)),
+                            fontSize: 15, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
+
                     Row(
                       children: [
                         Expanded(
@@ -231,6 +351,7 @@ class _NouvelleConsultationPageState
                       ],
                     ),
                     const SizedBox(height: 12),
+
                     TextFormField(
                       controller: _fcController,
                       keyboardType: TextInputType.number,
@@ -243,11 +364,14 @@ class _NouvelleConsultationPageState
                     ),
                     const SizedBox(height: 16),
 
-                    _buildTextField(_observationsController,
+                    _buildTextField(
+                        _observationsController,
                         'Observations additionnelles',
-                        'Remarques, recommandations...', Icons.notes,
+                        'Remarques, recommandations...',
+                        Icons.notes,
                         maxLines: 3),
                     const SizedBox(height: 32),
+
                     SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -255,7 +379,8 @@ class _NouvelleConsultationPageState
                         onPressed:
                             _isLoading ? null : _enregistrerConsultation,
                         icon: const Icon(Icons.check_circle),
-                        label: const Text('Enregistrer la consultation',
+                        label: const Text(
+                            'Enregistrer & Notifier l\'éleveur',
                             style: TextStyle(fontSize: 16)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.green[700],
@@ -298,7 +423,8 @@ class _NouvelleConsultationPageState
       ),
       maxLines: maxLines,
       validator: required
-          ? (val) => (val == null || val.isEmpty) ? 'Champ requis' : null
+          ? (val) =>
+              (val == null || val.isEmpty) ? 'Champ requis' : null
           : null,
     );
   }
@@ -350,11 +476,11 @@ class _NouvelleConsultationPageState
                       fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 Text('Race: ${widget.animal['race'] ?? 'N/A'}',
-                    style: TextStyle(
-                        fontSize: 14, color: Colors.grey[700])),
+                    style:
+                        TextStyle(fontSize: 14, color: Colors.grey[700])),
                 Text('Sexe: ${widget.animal['sexe'] ?? 'N/A'}',
-                    style: TextStyle(
-                        fontSize: 14, color: Colors.grey[700])),
+                    style:
+                        TextStyle(fontSize: 14, color: Colors.grey[700])),
                 Text('Tag: ${widget.animal['tag_rfid'] ?? 'N/A'}',
                     style: TextStyle(
                         fontSize: 12,

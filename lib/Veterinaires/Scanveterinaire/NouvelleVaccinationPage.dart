@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ============================================================
-// NOUVELLE VACCINATION — version synchronisée
+// NOUVELLE VACCINATION
+// ✅ ÉTAPE 3 : Notification automatique à l'éleveur après enregistrement
 // ============================================================
 class NouvelleVaccinationPage extends StatefulWidget {
   final Map<String, dynamic> animal;
@@ -32,7 +33,6 @@ class _NouvelleVaccinationPageState
   DateTime? _dateRappel;
   bool _isLoading = false;
 
-  // Vaccins courants pour les ovins Ladoum
   static const List<String> _vaccinsCommuns = [
     'Antirabique',
     'Peste des petits ruminants (PPR)',
@@ -51,6 +51,75 @@ class _NouvelleVaccinationPageState
     _lotController.dispose();
     _obsController.dispose();
     super.dispose();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // ✅ NOUVEAU : Récupérer l'ID de l'éleveur propriétaire
+  // ─────────────────────────────────────────────────────────
+  Future<String?> _getEleveurId() async {
+    try {
+      final table =
+          widget.source == 'nee' ? 'nouveaux_nee' : 'animal_acheter';
+      final result = await supabase
+          .from(table)
+          .select('user_id')
+          .eq('id', widget.animal['id'])
+          .maybeSingle();
+      return result?['user_id']?.toString();
+    } catch (e) {
+      debugPrint('❌ Erreur récupération éleveur: $e');
+      return null;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // ✅ NOUVEAU : Envoyer une notification à l'éleveur
+  // ─────────────────────────────────────────────────────────
+  Future<void> _notifierEleveur({
+    required String eleveurId,
+    required String veterinaireId,
+    required String nomAnimal,
+    required String nomVaccin,
+    String? dateRappel,
+  }) async {
+    try {
+      final vetData = await supabase
+          .from('users')
+          .select('nom_complet, prenom, nom')
+          .eq('id', veterinaireId)
+          .maybeSingle();
+
+      String nomVet = 'Dr. Inconnu';
+      if (vetData != null) {
+        nomVet = vetData['nom_complet'] ??
+            ((vetData['prenom'] != null && vetData['nom'] != null)
+                ? '${vetData['prenom']} ${vetData['nom']}'
+                : 'Dr. Inconnu');
+      }
+
+      String corps =
+          '$nomVet a effectué une vaccination.\nVaccin : $nomVaccin';
+      if (dateRappel != null) {
+        corps += '\n🔔 Rappel prévu le : $dateRappel';
+      }
+      corps += '\nConsultez l\'historique médical pour les détails.';
+
+      await supabase.from('notifications').insert({
+        'destinataire_id': eleveurId,
+        'expediteur_id': veterinaireId,
+        'type': 'nouvelle_vaccination',
+        'titre': '💉 Vaccination enregistrée pour $nomAnimal',
+        'corps': corps,
+        'animal_id': widget.animal['id'].toString(),
+        'animal_source': widget.source,
+        'lu': false,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      debugPrint('✅ Notification vaccination envoyée à l\'éleveur');
+    } catch (e) {
+      debugPrint('⚠️ Notification non envoyée: $e');
+    }
   }
 
   Future<void> _enregistrerVaccination() async {
@@ -73,7 +142,6 @@ class _NouvelleVaccinationPageState
         return;
       }
 
-      // ✅ Champs alignés avec la table vaccinations de Supabase
       final Map<String, dynamic> data = {
         'animal_id': widget.animal['id'],
         'source': widget.source,
@@ -96,13 +164,32 @@ class _NouvelleVaccinationPageState
             _dateRappel!.toIso8601String().split('T').first;
       }
 
+      // 1. Enregistrer la vaccination
       await supabase.from('vaccinations').insert(data);
+
+      // 2. ✅ NOUVEAU : Notifier l'éleveur en arrière-plan
+      final eleveurId = await _getEleveurId();
+      if (eleveurId != null) {
+        await _notifierEleveur(
+          eleveurId: eleveurId,
+          veterinaireId: veterinaire.id,
+          nomAnimal: widget.animal['nom'] ?? 'votre animal',
+          nomVaccin: _vaccController.text.trim(),
+          dateRappel: _dateRappel != null
+              ? '${_dateRappel!.day.toString().padLeft(2, '0')}/'
+                  '${_dateRappel!.month.toString().padLeft(2, '0')}/'
+                  '${_dateRappel!.year}'
+              : null,
+        );
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('✅ Vaccination enregistrée avec succès'),
+            content: Text(
+                '✅ Vaccination enregistrée — l\'éleveur a été notifié'),
             backgroundColor: Colors.blue,
+            duration: Duration(seconds: 3),
           ),
         );
         Navigator.pop(context, true);
@@ -128,6 +215,7 @@ class _NouvelleVaccinationPageState
       appBar: AppBar(
         title: const Text('Nouvelle Vaccination'),
         backgroundColor: Colors.blue[700],
+        foregroundColor: Colors.white,
       ),
       body: _isLoading
           ? const Center(
@@ -136,7 +224,7 @@ class _NouvelleVaccinationPageState
                 children: [
                   CircularProgressIndicator(),
                   SizedBox(height: 16),
-                  Text('Enregistrement en cours...'),
+                  Text('Enregistrement et notification en cours...'),
                 ],
               ),
             )
@@ -147,8 +235,34 @@ class _NouvelleVaccinationPageState
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Info animal
                     _buildAnimalInfo(),
+                    const SizedBox(height: 16),
+
+                    // ✅ Bandeau notification
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border:
+                            Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.notifications_active,
+                              color: Colors.blue[700], size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'L\'éleveur sera automatiquement notifié après l\'enregistrement',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.blue[900]),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     const SizedBox(height: 24),
 
                     const Text('Informations de vaccination',
@@ -157,10 +271,9 @@ class _NouvelleVaccinationPageState
                             fontWeight: FontWeight.bold)),
                     const SizedBox(height: 16),
 
-                    // Sélection vaccin commun
                     const Text('Vaccins fréquents',
-                        style: TextStyle(
-                            fontSize: 13, color: Colors.grey)),
+                        style:
+                            TextStyle(fontSize: 13, color: Colors.grey)),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -174,9 +287,10 @@ class _NouvelleVaccinationPageState
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 10, vertical: 6),
                                   decoration: BoxDecoration(
-                                    color: _vaccController.text == vaccin
-                                        ? Colors.blue[700]
-                                        : Colors.blue[50],
+                                    color:
+                                        _vaccController.text == vaccin
+                                            ? Colors.blue[700]
+                                            : Colors.blue[50],
                                     borderRadius:
                                         BorderRadius.circular(20),
                                     border: Border.all(
@@ -186,10 +300,10 @@ class _NouvelleVaccinationPageState
                                     vaccin,
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: _vaccController.text ==
-                                              vaccin
-                                          ? Colors.white
-                                          : Colors.blue[800],
+                                      color:
+                                          _vaccController.text == vaccin
+                                              ? Colors.white
+                                              : Colors.blue[800],
                                     ),
                                   ),
                                 ),
@@ -198,7 +312,6 @@ class _NouvelleVaccinationPageState
                     ),
                     const SizedBox(height: 16),
 
-                    // Champ nom vaccin
                     TextFormField(
                       controller: _vaccController,
                       decoration: const InputDecoration(
@@ -215,7 +328,6 @@ class _NouvelleVaccinationPageState
                     ),
                     const SizedBox(height: 16),
 
-                    // Dates
                     Row(
                       children: [
                         Expanded(
@@ -239,7 +351,6 @@ class _NouvelleVaccinationPageState
                     ),
                     const SizedBox(height: 16),
 
-                    // Lot
                     TextFormField(
                       controller: _lotController,
                       decoration: const InputDecoration(
@@ -252,7 +363,6 @@ class _NouvelleVaccinationPageState
                     ),
                     const SizedBox(height: 16),
 
-                    // Observations
                     TextFormField(
                       controller: _obsController,
                       decoration: const InputDecoration(
@@ -275,7 +385,7 @@ class _NouvelleVaccinationPageState
                             : _enregistrerVaccination,
                         icon: const Icon(Icons.check_circle),
                         label: const Text(
-                            'Enregistrer la vaccination',
+                            'Enregistrer & Notifier l\'éleveur',
                             style: TextStyle(fontSize: 16)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue[700],
@@ -332,7 +442,8 @@ class _NouvelleVaccinationPageState
         },
         trailing: nullable && date != null
             ? IconButton(
-                icon: const Icon(Icons.clear, size: 16, color: Colors.grey),
+                icon: const Icon(Icons.clear,
+                    size: 16, color: Colors.grey),
                 onPressed: () => setState(() => _dateRappel = null),
               )
             : null,
@@ -357,7 +468,8 @@ class _NouvelleVaccinationPageState
               color: Colors.blue[100],
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(Icons.pets, size: 30, color: Colors.blue),
+            child:
+                const Icon(Icons.pets, size: 30, color: Colors.blue),
           ),
           const SizedBox(width: 12),
           Expanded(

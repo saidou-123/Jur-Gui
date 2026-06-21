@@ -1,13 +1,12 @@
+import 'dart:async';
+import 'package:depart/Veterinaires/Scanveterinaire/FicheSanteDetailAnimal.dart';
+import 'package:depart/Veterinaires/Scanveterinaire/NouvelleConsultationPage.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'FicheSanteDetailAnimal.dart';
-import 'NouvelleConsultationPage.dart';
+import 'dart:convert';
 
-// ============================================================
-// SCAN RFID VÉTÉRINAIRE BLE — version synchronisée
-// ============================================================
 class ScanRFIDVeterinaireBluetooth extends StatefulWidget {
   const ScanRFIDVeterinaireBluetooth({super.key});
 
@@ -18,17 +17,26 @@ class ScanRFIDVeterinaireBluetooth extends StatefulWidget {
 
 class _ScanRFIDVeterinaireBluetoothState
     extends State<ScanRFIDVeterinaireBluetooth> {
+  // ========== BLUETOOTH BLE ==========
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _rfidCharacteristic;
+  StreamSubscription? _scanSubscription;
+  StreamSubscription? _deviceStateSubscription;
+  StreamSubscription? _characteristicSubscription;
   bool _isScanning = false;
   bool _isConnected = false;
 
-  static const String SERVICE_UUID =
-      '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+  // UUIDs identiques aux autres pages
+  static const String SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
   static const String CHARACTERISTIC_UUID =
-      'beb5483e-36e1-4688-b7f5-ea07361b26a8';
-  static const String ESP32_NAME = 'Jur-Gui';
+      "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
+  // Anti-doublon
+  String? _lastReceivedUID;
+  DateTime? _lastScanTime;
+  static const Duration _antiSpamDelay = Duration(seconds: 2);
+
+  // ========== ÉTAT UI ==========
   bool _isSearching = false;
   String? _lastScannedUID;
   Map<String, dynamic>? _animalInfo;
@@ -38,7 +46,7 @@ class _ScanRFIDVeterinaireBluetoothState
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _requestPermissionsAndConnect();
+      _initializeBluetooth();
     });
   }
 
@@ -49,159 +57,405 @@ class _ScanRFIDVeterinaireBluetoothState
   }
 
   // =====================================================
-  // PERMISSIONS
+  // BLUETOOTH BLE - INITIALISATION AVEC PERMISSIONS
   // =====================================================
-  Future<void> _requestPermissionsAndConnect() async {
+  Future<void> _initializeBluetooth() async {
     if (!mounted) return;
 
-    final statuses = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.location,
-    ].request();
+    try {
+      debugPrint("📱 Initialisation Bluetooth...");
 
-    if (statuses.values.any((s) => !s.isGranted)) {
-      _showSnackBar('❌ Permissions Bluetooth refusées', Colors.red);
-      return;
+      // ✅ Demander les permissions au runtime
+      final permissions = await [
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+        Permission.location,
+      ].request();
+
+      permissions.forEach((perm, status) {
+        debugPrint("🔑 $perm → $status");
+      });
+
+      final denied = permissions.entries
+          .where((e) => !e.value.isGranted)
+          .map((e) => e.key.toString())
+          .toList();
+
+      if (denied.isNotEmpty) {
+        debugPrint("❌ Permissions refusées: $denied");
+        if (mounted) _showSnackBar("❌ Permissions BLE refusées", Colors.red);
+        return;
+      }
+
+      debugPrint("✅ Toutes les permissions accordées");
+
+      if (await FlutterBluePlus.isSupported == false) {
+        if (mounted) _showSnackBar("❌ Bluetooth non supporté", Colors.red);
+        return;
+      }
+
+      final state = await FlutterBluePlus.adapterState.first;
+      debugPrint("📡 État Bluetooth: $state");
+
+      if (state != BluetoothAdapterState.on) {
+        if (mounted) _showSnackBar("⚠️ Activez le Bluetooth", Colors.orange);
+        return;
+      }
+
+      _startBLEScan();
+
+    } catch (e, stackTrace) {
+      debugPrint("❌ Erreur Init Bluetooth: $e");
+      debugPrint("Stack: $stackTrace");
+      if (mounted) _showSnackBar("❌ Erreur Bluetooth: $e", Colors.red);
     }
-
-    if (!await FlutterBluePlus.isOn) {
-      _showSnackBar('⚠️ Veuillez activer le Bluetooth', Colors.orange);
-      return;
-    }
-
-    await _connectToESP32();
   }
 
   // =====================================================
-  // CONNEXION ESP32
+  // BLUETOOTH BLE - SCAN CORRIGÉ
   // =====================================================
-  Future<void> _connectToESP32() async {
-    if (!mounted) return;
+  Future<void> _startBLEScan() async {
+    if (_isScanning || _isConnected) return;
+
     setState(() => _isScanning = true);
-    _showSnackBar('🔍 Recherche de $ESP32_NAME...', Colors.blue);
+    debugPrint("🔍 Scan BLE démarré...");
+    _showSnackBar("🔍 Recherche du lecteur RFID...", Colors.blue);
 
     try {
-      await FlutterBluePlus.startScan(
-          timeout: const Duration(seconds: 4));
+      await FlutterBluePlus.stopScan();
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      FlutterBluePlus.scanResults.listen((results) async {
-        for (final result in results) {
-          if (result.device.name == ESP32_NAME) {
-            await FlutterBluePlus.stopScan();
-            await _connectToDevice(result.device);
-            break;
+      // ✅ Vérifier d'abord les appareils bondés
+      final bonded = await FlutterBluePlus.bondedDevices;
+      debugPrint("📋 Appareils bondés: ${bonded.length}");
+      for (final d in bonded) {
+        debugPrint("   🔗 Bondé: '${d.platformName}' | ${d.remoteId}");
+        if (d.platformName.contains("Jur-Gui") ||
+            d.platformName.contains("JUR-GUI") ||
+            d.platformName.contains("ESP32") ||
+            d.platformName.contains("RFID")) {
+          debugPrint("✅ ESP32 trouvé dans les bondés!");
+          setState(() => _isScanning = false);
+          _connectToDevice(d);
+          return;
+        }
+      }
+
+      // ✅ Écouter AVANT de démarrer le scan
+      _scanSubscription = FlutterBluePlus.onScanResults.listen((results) {
+        if (results.isEmpty) return;
+        for (ScanResult r in results) {
+          final name = r.device.platformName;
+          debugPrint("📡 '$name' | ${r.device.remoteId} | RSSI:${r.rssi}");
+
+          if (name.contains("Jur-Gui") ||
+              name.contains("JUR-GUI") ||
+              name.contains("ESP32") ||
+              name.contains("RFID") ||
+              name.contains("BLE_RFID")) {
+            debugPrint("✅ ESP32 détecté via scan!");
+            _stopBLEScan().then((_) => _connectToDevice(r.device));
+            return;
           }
         }
       });
 
-      await Future.delayed(const Duration(seconds: 5));
+      // ✅ Démarrer APRÈS l'écoute
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: 30),
+        androidUsesFineLocation: false,
+        withServices: [],
+      );
 
-      if (!_isConnected && mounted) {
-        setState(() => _isScanning = false);
-        _showSnackBar('❌ ESP32 non trouvé', Colors.red);
-      }
+      debugPrint("✅ Scan actif, en attente d'appareils...");
+
+      Future.delayed(const Duration(seconds: 30), () {
+        if (_isScanning && !_isConnected && mounted) {
+          _stopBLEScan();
+          _showSnackBar("⚠️ ESP32 non trouvé — réessayez", Colors.orange);
+        }
+      });
+
     } catch (e) {
-      debugPrint('❌ Erreur scan BLE: $e');
+      debugPrint("❌ Erreur scan: $e");
       if (mounted) {
         setState(() => _isScanning = false);
-        _showSnackBar('Erreur: $e', Colors.red);
+        _showSnackBar("❌ Erreur lors du scan", Colors.red);
       }
     }
   }
 
+  Future<void> _stopBLEScan() async {
+    await _scanSubscription?.cancel();
+    _scanSubscription = null;
+    await FlutterBluePlus.stopScan();
+    if (mounted) setState(() => _isScanning = false);
+    debugPrint("🛑 Scan BLE arrêté");
+  }
+
   // =====================================================
-  // CONNEXION DEVICE
+  // BLUETOOTH BLE - CONNEXION À L'ESP32
   // =====================================================
   Future<void> _connectToDevice(BluetoothDevice device) async {
-    if (!mounted) return;
-
     try {
-      await device.connect(timeout: const Duration(seconds: 10));
-      _connectedDevice = device;
+      await _stopBLEScan();
 
-      // ✅ Écoute de la déconnexion inattendue
-      device.connectionState.listen((state) {
+      debugPrint("🔗 Connexion à ${device.platformName}...");
+      _showSnackBar("🔗 Connexion au lecteur...", Colors.blue);
+
+      await device.connect(
+        timeout: const Duration(seconds: 15),
+        autoConnect: false,
+      );
+
+      setState(() {
+        _connectedDevice = device;
+        _isConnected = true;
+      });
+
+      debugPrint("✅ Connecté à ${device.platformName}");
+      _showSnackBar("✅ Lecteur RFID connecté", Colors.green);
+
+      // ✅ Ignorer le premier événement "disconnected"
+      bool firstEvent = true;
+      _deviceStateSubscription = device.connectionState.listen((state) {
+        debugPrint("📶 État connexion: $state");
+
+        if (firstEvent) {
+          firstEvent = false;
+          return;
+        }
+
         if (state == BluetoothConnectionState.disconnected && mounted) {
-          setState(() {
-            _isConnected = false;
-            _rfidCharacteristic = null;
-          });
-          _showSnackBar(
-              '⚠️ ESP32 déconnecté. Appuyez pour reconnecter.',
-              Colors.orange);
+          debugPrint("🔴 Appareil déconnecté");
+          _handleDisconnection();
         }
       });
 
-      final services = await device.discoverServices();
+      await _discoverServices(device);
 
-      for (final service in services) {
-        if (service.uuid.toString().toLowerCase() ==
-            SERVICE_UUID.toLowerCase()) {
-          for (final characteristic in service.characteristics) {
-            if (characteristic.uuid.toString().toLowerCase() ==
-                CHARACTERISTIC_UUID.toLowerCase()) {
-              _rfidCharacteristic = characteristic;
-              await characteristic.setNotifyValue(true);
-              characteristic.value.listen((value) {
-                if (value.isNotEmpty) {
-                  final uid = String.fromCharCodes(value);
-                  _onTagDetected(uid);
-                }
-              });
-              break;
-            }
-          }
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _isConnected = true;
-          _isScanning = false;
-        });
-        _showSnackBar('✅ Connecté à $ESP32_NAME', Colors.green);
-      }
     } catch (e) {
-      debugPrint('❌ Erreur connexion: $e');
+      debugPrint("❌ Erreur connexion: $e");
       if (mounted) {
+        _showSnackBar("❌ Échec de connexion", Colors.red);
         setState(() {
+          _connectedDevice = null;
           _isConnected = false;
-          _isScanning = false;
         });
-        _showSnackBar('Erreur connexion: $e', Colors.red);
+        Future.delayed(const Duration(seconds: 2), _startBLEScan);
       }
     }
   }
 
   // =====================================================
-  // DÉCONNEXION BLE
+  // BLUETOOTH BLE - DÉCOUVERTE DES SERVICES
+  // =====================================================
+  Future<void> _discoverServices(BluetoothDevice device) async {
+    try {
+      debugPrint("🔍 Découverte des services...");
+
+      // ✅ Délai de stabilisation
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      List<BluetoothService> services = await device.discoverServices();
+      debugPrint("📋 Nombre de services trouvés: ${services.length}");
+
+      for (BluetoothService service in services) {
+        debugPrint("📋 Service UUID: ${service.uuid.toString().toLowerCase()}");
+        for (BluetoothCharacteristic c in service.characteristics) {
+          debugPrint(
+              "   └─ Caractéristique: ${c.uuid} | notify:${c.properties.notify}");
+        }
+      }
+
+      // ✅ Recherche par contains
+      BluetoothService? targetService;
+      for (BluetoothService service in services) {
+        if (service.uuid
+            .toString()
+            .toLowerCase()
+            .contains(SERVICE_UUID.substring(0, 8).toLowerCase())) {
+          targetService = service;
+          debugPrint("✅ Service trouvé!");
+          break;
+        }
+      }
+
+      if (targetService == null) {
+        debugPrint("❌ Service introuvable");
+        for (var s in services) debugPrint("   → ${s.uuid}");
+        _showSnackBar("❌ Service RFID non trouvé", Colors.red);
+        return;
+      }
+
+      BluetoothCharacteristic? targetChar;
+      for (BluetoothCharacteristic c in targetService.characteristics) {
+        if (c.uuid
+            .toString()
+            .toLowerCase()
+            .contains(CHARACTERISTIC_UUID.substring(0, 8).toLowerCase())) {
+          targetChar = c;
+          debugPrint("✅ Caractéristique trouvée!");
+          break;
+        }
+      }
+
+      if (targetChar == null) {
+        debugPrint("❌ Caractéristique introuvable");
+        _showSnackBar("❌ Caractéristique RFID non trouvée", Colors.red);
+        return;
+      }
+
+      _rfidCharacteristic = targetChar;
+      await _subscribeToRFID(targetChar);
+
+    } catch (e, stack) {
+      debugPrint("❌ Erreur discoverServices: $e\n$stack");
+      if (mounted) _showSnackBar("❌ Erreur de communication", Colors.red);
+    }
+  }
+
+  // =====================================================
+  // BLUETOOTH BLE - ÉCOUTE DES NOTIFICATIONS RFID
+  // =====================================================
+  Future<void> _subscribeToRFID(BluetoothCharacteristic characteristic) async {
+    try {
+      // ✅ Attendre stabilisation
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // ✅ Lecture initiale
+      try {
+        final initial = await characteristic.read();
+        if (initial.isNotEmpty) {
+          debugPrint("📖 Valeur initiale: ${utf8.decode(initial)}");
+        }
+      } catch (_) {}
+
+      // ✅ Activer les notifications
+      await characteristic.setNotifyValue(true);
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      debugPrint("✅ Notifications RFID activées");
+      _showSnackBar("✅ Système RFID prêt", Colors.green);
+
+      // ✅ onValueReceived au lieu de value/lastValueStream
+      _characteristicSubscription = characteristic.onValueReceived.listen(
+        (value) {
+          debugPrint("📥 Données BLE brutes: $value");
+          if (value.isNotEmpty) {
+            _onRFIDDataReceived(value);
+          }
+        },
+        onError: (error) {
+          debugPrint("❌ Erreur notification: $error");
+        },
+      );
+
+    } catch (e) {
+      debugPrint("❌ Erreur souscription: $e");
+      if (mounted) _showSnackBar("❌ Échec d'activation RFID", Colors.red);
+    }
+  }
+
+  // =====================================================
+  // TRAITEMENT DES DONNÉES RFID REÇUES
+  // =====================================================
+  void _onRFIDDataReceived(List<int> value) {
+    try {
+      String uid = utf8.decode(value).trim();
+
+      debugPrint("═══════════════════════════════");
+      debugPrint("🏷️  UID REÇU VIA BLE : $uid");
+      debugPrint("═══════════════════════════════");
+
+      // Anti-spam
+      final now = DateTime.now();
+      if (_lastReceivedUID == uid &&
+          _lastScanTime != null &&
+          now.difference(_lastScanTime!) < _antiSpamDelay) {
+        debugPrint("⏭️  Ignoré (anti-spam)");
+        return;
+      }
+
+      _lastReceivedUID = uid;
+      _lastScanTime = now;
+
+      if (mounted) _onTagDetected(uid);
+
+    } catch (e) {
+      debugPrint("❌ Erreur décodage UID: $e");
+    }
+  }
+
+  // =====================================================
+  // DÉCONNEXION BLUETOOTH
   // =====================================================
   Future<void> _disconnectBLE() async {
     try {
-      if (_rfidCharacteristic != null) {
-        await _rfidCharacteristic!.setNotifyValue(false);
-      }
+      await _characteristicSubscription?.cancel();
+      await _deviceStateSubscription?.cancel();
+      await _scanSubscription?.cancel();
+
       if (_connectedDevice != null) {
         await _connectedDevice!.disconnect();
       }
-    } catch (_) {}
-    if (mounted) {
-      setState(() {
-        _isConnected = false;
-        _connectedDevice = null;
-        _rfidCharacteristic = null;
-      });
+
+      _characteristicSubscription = null;
+      _deviceStateSubscription = null;
+      _scanSubscription = null;
+      _connectedDevice = null;
+      _rfidCharacteristic = null;
+
+      if (mounted) setState(() => _isConnected = false);
+
+      debugPrint("🔴 Bluetooth déconnecté");
+    } catch (e) {
+      debugPrint("⚠️ Erreur déconnexion: $e");
     }
   }
 
+  // ✅ Sans boucle infinie
+  void _handleDisconnection() {
+    if (!mounted) return;
+
+    _deviceStateSubscription?.cancel();
+    _deviceStateSubscription = null;
+
+    _showSnackBar("🔴 Lecteur RFID déconnecté", Colors.red);
+
+    setState(() {
+      _isConnected = false;
+      _connectedDevice = null;
+      _rfidCharacteristic = null;
+    });
+
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted && !_isConnected && !_isScanning) {
+        debugPrint("🔄 Relance du scan après déconnexion...");
+        _startBLEScan();
+      }
+    });
+  }
+
+  Future<void> _reconnectBLE() async {
+    await _disconnectBLE();
+    await Future.delayed(const Duration(milliseconds: 500));
+    _initializeBluetooth();
+  }
+
   // =====================================================
-  // DÉTECTION TAG RFID
+  // DÉTECTION TAG ET RECHERCHE DE L'ANIMAL
   // =====================================================
   Future<void> _onTagDetected(String uid) async {
     if (!mounted) return;
 
     final cleanUid = uid.trim().toUpperCase();
+    debugPrint("════════════════════════════════════");
+    debugPrint("🏷️  TAG DÉTECTÉ : $cleanUid");
+    debugPrint("════════════════════════════════════");
+
+    final currentUser = Supabase.instance.client.auth.currentUser;
+    debugPrint("👤 User: ${currentUser?.id} | ${currentUser?.email}");
 
     setState(() {
       _isSearching = true;
@@ -210,70 +464,69 @@ class _ScanRFIDVeterinaireBluetoothState
       _sourceTable = null;
     });
 
-    _showSnackBar('🔍 Recherche en cours...', Colors.blue);
+    _showSnackBar("🔍 Recherche en cours...", Colors.blue);
 
     try {
-      // Chercher dans nouveaux_nee
+      // 🔍 Rechercher dans nouveaux_nee
+      debugPrint("🔎 Recherche dans nouveaux_nee...");
       var result = await Supabase.instance.client
           .from('nouveaux_nee')
           .select('*')
           .ilike('tag_rfid', cleanUid)
           .maybeSingle();
 
-      if (result != null && mounted) {
-        setState(() {
-          _animalInfo = result;
-          _sourceTable = 'nee';
-          _isSearching = false;
-        });
-        _showSnackBar('✅ Animal trouvé !', Colors.green);
+      if (result != null) {
+        debugPrint("✅ Trouvé dans nouveaux_nee: ${result['nom']}");
+        if (mounted) {
+          setState(() {
+            _animalInfo = result;
+            _sourceTable = 'nee';
+            _isSearching = false;
+          });
+          _showSnackBar("✅ Animal trouvé : ${result['nom']}", Colors.green);
+        }
         return;
       }
 
-      // Chercher dans animal_acheter
+      // 🔍 Rechercher dans animal_acheter
+      debugPrint("🔎 Recherche dans animal_acheter...");
       result = await Supabase.instance.client
           .from('animal_acheter')
           .select('*')
           .ilike('tag_rfid', cleanUid)
           .maybeSingle();
 
-      if (result != null && mounted) {
-        setState(() {
-          _animalInfo = result;
-          _sourceTable = 'achete';
-          _isSearching = false;
-        });
-        _showSnackBar('✅ Animal trouvé !', Colors.green);
+      if (result != null) {
+        debugPrint("✅ Trouvé dans animal_acheter: ${result['nom']}");
+        if (mounted) {
+          setState(() {
+            _animalInfo = result;
+            _sourceTable = 'achete';
+            _isSearching = false;
+          });
+          _showSnackBar("✅ Animal trouvé : ${result['nom']}", Colors.green);
+        }
         return;
       }
 
+      // ❌ Non trouvé
+      debugPrint("❌ Aucun animal trouvé avec UID: $cleanUid");
       if (mounted) {
         setState(() {
           _isSearching = false;
           _animalInfo = null;
           _sourceTable = null;
         });
-        _showSnackBar('❌ Aucun animal avec ce tag RFID', Colors.red);
+        _showSnackBar("❌ Aucun animal avec ce tag RFID", Colors.red);
       }
-    } catch (e) {
-      debugPrint('❌ Erreur recherche: $e');
+
+    } catch (e, stackTrace) {
+      debugPrint("❌ Erreur recherche: $e\nStack: $stackTrace");
       if (mounted) {
         setState(() => _isSearching = false);
-        _showSnackBar('Erreur: ${e.toString()}', Colors.red);
+        _showSnackBar("Erreur: ${e.toString()}", Colors.red);
       }
     }
-  }
-
-  // =====================================================
-  // RECONNEXION
-  // =====================================================
-  Future<void> _reconnectBLE() async {
-    if (!mounted) return;
-    _showSnackBar('🔄 Reconnexion en cours...', Colors.orange);
-    setState(() => _isScanning = true);
-    await _disconnectBLE();
-    await Future.delayed(const Duration(milliseconds: 500));
-    await _connectToESP32();
   }
 
   // =====================================================
@@ -281,22 +534,23 @@ class _ScanRFIDVeterinaireBluetoothState
   // =====================================================
   Future<void> _testManuelRecherche() async {
     final controller = TextEditingController();
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Test Manuel'),
+        title: const Text("Test Manuel"),
         content: TextField(
           controller: controller,
           decoration: const InputDecoration(
-            labelText: 'Entrez un tag RFID',
-            hintText: 'Ex: D3F1CD2C',
+            labelText: "Entrez un tag RFID",
+            hintText: "Ex: D3F1CD2C",
           ),
           textCapitalization: TextCapitalization.characters,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
+            child: const Text("Annuler"),
           ),
           ElevatedButton(
             onPressed: () {
@@ -305,7 +559,7 @@ class _ScanRFIDVeterinaireBluetoothState
                 _onTagDetected(controller.text);
               }
             },
-            child: const Text('Rechercher'),
+            child: const Text("Rechercher"),
           ),
         ],
       ),
@@ -324,25 +578,34 @@ class _ScanRFIDVeterinaireBluetoothState
   }
 
   // =====================================================
-  // BUILD
+  // BUILD UI
   // =====================================================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Scan RFID — Vétérinaire'),
+        title: const Text("Scan RFID - Vétérinaire"),
         backgroundColor: Colors.blue[700],
         actions: [
           IconButton(
             icon: Icon(
               _isConnected
                   ? Icons.bluetooth_connected
-                  : Icons.bluetooth_disabled,
-              color: _isConnected ? Colors.white : Colors.orange,
+                  : _isScanning
+                      ? Icons.bluetooth_searching
+                      : Icons.bluetooth_disabled,
+              color: _isConnected
+                  ? Colors.white
+                  : _isScanning
+                      ? Colors.blue
+                      : Colors.orange,
             ),
-            onPressed: _reconnectBLE,
-            tooltip:
-                _isConnected ? 'Connecté — tap pour reconnecter' : 'Reconnecter',
+            onPressed: _isConnected ? null : _reconnectBLE,
+            tooltip: _isConnected
+                ? "Connecté"
+                : _isScanning
+                    ? "Recherche..."
+                    : "Reconnecter",
           ),
         ],
       ),
@@ -350,6 +613,8 @@ class _ScanRFIDVeterinaireBluetoothState
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            _buildBLEStatusCard(),
+            const SizedBox(height: 16),
             _buildScanSection(),
             const SizedBox(height: 24),
             if (_isSearching)
@@ -366,58 +631,120 @@ class _ScanRFIDVeterinaireBluetoothState
     );
   }
 
+  // ✅ Carte d'état BLE (nouvelle — absente dans l'original)
+  Widget _buildBLEStatusCard() {
+    String statusText;
+    Color statusColor;
+    IconData statusIcon;
+
+    if (_isConnected) {
+      statusText = "✅ Lecteur RFID connecté";
+      statusColor = Colors.green;
+      statusIcon = Icons.bluetooth_connected;
+    } else if (_isScanning) {
+      statusText = "🔍 Recherche du lecteur...";
+      statusColor = Colors.blue;
+      statusIcon = Icons.bluetooth_searching;
+    } else {
+      statusText = "❌ Lecteur non connecté";
+      statusColor = Colors.orange;
+      statusIcon = Icons.bluetooth_disabled;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: statusColor.withOpacity(0.1),
+        border: Border.all(color: statusColor, width: 2),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(statusIcon, color: statusColor, size: 32),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              statusText,
+              style: TextStyle(
+                color: statusColor,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ),
+          if (!_isConnected && !_isScanning)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _reconnectBLE,
+              color: statusColor,
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildScanSection() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.blue[700],
+        gradient: LinearGradient(
+          colors: _isConnected
+              ? [Colors.blue[700]!, Colors.blue[500]!]
+              : [Colors.grey[700]!, Colors.grey[500]!],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
         borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: (_isConnected ? Colors.blue : Colors.grey).withOpacity(0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         children: [
           Icon(
-            _isConnected
-                ? Icons.bluetooth_connected
-                : Icons.bluetooth_searching,
+            _isConnected ? Icons.bluetooth_connected : Icons.bluetooth_searching,
             size: 80,
             color: Colors.white,
           ),
           const SizedBox(height: 16),
           Text(
             _isConnected
-                ? 'Prêt à scanner'
+                ? "Prêt à scanner"
                 : _isScanning
-                    ? 'Recherche ESP32...'
-                    : 'Non connecté',
+                    ? "Recherche ESP32..."
+                    : "Non connecté",
             style: const TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.bold),
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
             _isConnected
-                ? 'Approchez un tag RFID du lecteur'
-                : 'Vérifiez que l\'ESP32 est allumé',
-            style:
-                const TextStyle(color: Colors.white70, fontSize: 14),
+                ? "Approchez un tag RFID du lecteur"
+                : "Vérifiez que l'ESP32 est allumé",
+            style: const TextStyle(color: Colors.white70, fontSize: 14),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 12),
           if (!_isConnected)
             ElevatedButton.icon(
-              onPressed:
-                  _isScanning ? null : _reconnectBLE,
+              onPressed: _isScanning ? null : _reconnectBLE,
               icon: _isScanning
                   ? const SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white))
+                          strokeWidth: 2, color: Colors.white),
+                    )
                   : const Icon(Icons.bluetooth_searching),
-              label: Text(_isScanning ? 'Recherche...' : 'Connecter'),
+              label: Text(_isScanning ? "Recherche..." : "Connecter"),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white,
                 foregroundColor: Colors.blue[700],
@@ -427,7 +754,7 @@ class _ScanRFIDVeterinaireBluetoothState
           OutlinedButton.icon(
             onPressed: _testManuelRecherche,
             icon: const Icon(Icons.edit, color: Colors.white),
-            label: const Text('Test manuel',
+            label: const Text("Test manuel",
                 style: TextStyle(color: Colors.white)),
             style: OutlinedButton.styleFrom(
               side: const BorderSide(color: Colors.white, width: 2),
@@ -450,12 +777,11 @@ class _ScanRFIDVeterinaireBluetoothState
         children: [
           const CircularProgressIndicator(),
           const SizedBox(height: 16),
-          const Text('Recherche en cours...',
-              style:
-                  TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text("Recherche en cours...",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Text(
-            'Tag RFID : $_lastScannedUID',
+            "Tag RFID : $_lastScannedUID",
             style: TextStyle(
                 fontSize: 14,
                 color: Colors.grey[700],
@@ -478,18 +804,15 @@ class _ScanRFIDVeterinaireBluetoothState
         children: [
           Icon(Icons.touch_app, size: 80, color: Colors.grey[400]),
           const SizedBox(height: 16),
-          Text('En attente de scan',
+          Text("En attente de scan",
               style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: Colors.grey[700])),
           const SizedBox(height: 8),
-          Text(
-            'Scannez un tag RFID ou utilisez le test manuel',
-            style:
-                TextStyle(fontSize: 14, color: Colors.grey[600]),
-            textAlign: TextAlign.center,
-          ),
+          Text("Scannez un tag RFID ou utilisez le test manuel",
+              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+              textAlign: TextAlign.center),
         ],
       ),
     );
@@ -507,7 +830,7 @@ class _ScanRFIDVeterinaireBluetoothState
         children: [
           const Icon(Icons.error_outline, size: 80, color: Colors.red),
           const SizedBox(height: 16),
-          const Text('Animal non trouvé',
+          const Text("Animal non trouvé",
               style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -516,21 +839,17 @@ class _ScanRFIDVeterinaireBluetoothState
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-            ),
+                color: Colors.white, borderRadius: BorderRadius.circular(8)),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Icon(Icons.nfc, size: 20, color: Colors.grey),
                 const SizedBox(width: 8),
-                Text(
-                  _lastScannedUID ?? 'N/A',
-                  style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold),
-                ),
+                Text(_lastScannedUID ?? 'N/A',
+                    style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold)),
               ],
             ),
           ),
@@ -538,9 +857,9 @@ class _ScanRFIDVeterinaireBluetoothState
           ElevatedButton.icon(
             onPressed: _testManuelRecherche,
             icon: const Icon(Icons.search),
-            label: const Text('Réessayer manuellement'),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange),
+            label: const Text("Réessayer manuellement"),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: Colors.orange),
           ),
         ],
       ),
@@ -552,22 +871,21 @@ class _ScanRFIDVeterinaireBluetoothState
 
     return Card(
       elevation: 8,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Column(
         children: [
+          // En-tête
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: Colors.green[700],
-              borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(16)),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(16)),
             ),
             child: Column(
               children: [
-                const Icon(Icons.check_circle,
-                    color: Colors.white, size: 50),
+                const Icon(Icons.check_circle, color: Colors.white, size: 50),
                 const SizedBox(height: 8),
                 Text(
                   _animalInfo!['nom'] ?? 'Sans nom',
@@ -577,49 +895,57 @@ class _ScanRFIDVeterinaireBluetoothState
                       fontWeight: FontWeight.bold),
                 ),
                 Text(
-                  _sourceTable == 'nee'
-                      ? '🐑 Nouveau-né'
-                      : '🛒 Animal acheté',
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 14),
+                  _sourceTable == 'nee' ? '🐑 Nouveau-né' : '🛒 Animal acheté',
+                  style:
+                      const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
               ],
             ),
           ),
+
+          // Image
           if (_animalInfo!['image_url'] != null)
             Image.network(
               _animalInfo!['image_url'],
               width: double.infinity,
-              height: 220,
+              height: 250,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) =>
-                  const SizedBox(height: 0),
+              errorBuilder: (context, error, _) => Container(
+                height: 250,
+                color: Colors.grey[300],
+                child:
+                    const Icon(Icons.error, size: 60, color: Colors.red),
+              ),
             ),
+
+          // Infos
           Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
               children: [
-                _buildInfoRow(Icons.agriculture, 'Race',
-                    _animalInfo!['race'] ?? 'N/A'),
+                _buildInfoRow(
+                    Icons.agriculture, "Race", _animalInfo!['race'] ?? 'N/A'),
                 const Divider(height: 24),
                 _buildInfoRow(
-                    Icons.wc, 'Sexe', _animalInfo!['sexe'] ?? 'N/A'),
+                    Icons.wc, "Sexe", _animalInfo!['sexe'] ?? 'N/A'),
                 const Divider(height: 24),
-                _buildInfoRow(Icons.nfc, 'Tag RFID',
+                _buildInfoRow(Icons.nfc, "Tag RFID",
                     _animalInfo!['tag_rfid'] ?? 'N/A'),
                 if (_animalInfo!['date_naissance'] != null) ...[
                   const Divider(height: 24),
-                  _buildInfoRow(Icons.calendar_today,
-                      'Date naissance', _animalInfo!['date_naissance']),
+                  _buildInfoRow(Icons.calendar_today, "Date naissance",
+                      _animalInfo!['date_naissance']),
                 ],
                 if (_animalInfo!['provenance'] != null) ...[
                   const Divider(height: 24),
-                  _buildInfoRow(Icons.location_on, 'Provenance',
+                  _buildInfoRow(Icons.location_on, "Provenance",
                       _animalInfo!['provenance']),
                 ],
               ],
             ),
           ),
+
+          // Boutons d'action
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -639,12 +965,11 @@ class _ScanRFIDVeterinaireBluetoothState
                       );
                     },
                     icon: const Icon(Icons.medical_services),
-                    label: const Text('Voir la fiche de santé'),
+                    label: const Text("Fiche de Santé"),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green[700],
                       foregroundColor: Colors.white,
-                      padding:
-                          const EdgeInsets.symmetric(vertical: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                   ),
                 ),
@@ -656,26 +981,18 @@ class _ScanRFIDVeterinaireBluetoothState
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) =>
-                              NouvelleConsultationPage(
+                          builder: (context) => NouvelleConsultationPage(
                             animal: _animalInfo!,
                             source: _sourceTable!,
                           ),
                         ),
-                      ).then((ok) {
-                        if (ok == true) {
-                          _showSnackBar(
-                              '✅ Consultation enregistrée',
-                              Colors.green);
-                        }
-                      });
+                      );
                     },
                     icon: const Icon(Icons.add),
-                    label: const Text('Nouvelle Consultation'),
+                    label: const Text("Nouvelle Consultation"),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.blue[700],
-                      padding:
-                          const EdgeInsets.symmetric(vertical: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                   ),
                 ),

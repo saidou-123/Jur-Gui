@@ -329,7 +329,7 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
     return AppBar(
       title: const Text(
         "JUR GUI - Vétérinaire",
-        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20,color:Colors.white ),
       ),
       centerTitle: true,
       backgroundColor: Colors.white,

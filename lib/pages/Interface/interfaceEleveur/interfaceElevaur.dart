@@ -1,15 +1,20 @@
 // ============================================================
 // INTERFACE ÉLEVEUR - VERSION PRODUCTION AVEC BOTTOM NAV BAR
+// ✅ ÉTAPE 3 : Notifications réelles connectées à Supabase
+//    - Badge dynamique avec compteur des non lues
+//    - Bouton cloche navigue vers NotificationsPage
+//    - Bottom nav "Alertes" navigue aussi vers NotificationsPage
+//    - Écoute temps réel : badge mis à jour automatiquement
 // Fichier: lib/pages/Interface/interfaceEleveur.dart
 // ============================================================
 
 import 'package:depart/Eleveures/Ajouter%20Animal/AjouterAnimal.dart';
 import 'package:depart/Eleveures/AnimalInfoRFID/AnimalInfoRFIDBluetooth.dart';
 import 'package:depart/Eleveures/New/Accouplemt/Accouplement..dart';
+import 'package:depart/Eleveures/New/Notification/NotificationBadge.dart';
 import 'package:depart/Eleveures/New/Notification/NotificationsViewPage.dart';
 import 'package:depart/Eleveures/New/chaleur/ChaleurModule.dart';
 import 'package:depart/Eleveures/New/genealogique/ArbreGenealogique.dart';
-// ✅ NOUVEAU — Import Copilot
 import 'package:depart/Eleveures/New/Copilot/CopilotPage.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -44,6 +49,10 @@ class _interfaceElevaureState extends State<interfaceElevaur>
   String _userEmail = "";
   String _userName = "";
 
+  // ✅ NOUVEAU — Compteur notifications non lues (badge dynamique)
+  int _notifNonLues = 0;
+  RealtimeChannel? _notifChannel;
+
   // BottomNav
   int _selectedIndex = 0;
 
@@ -52,12 +61,109 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     super.initState();
     _initAnimations();
     _initializeData();
+    // ✅ NOUVEAU — Charger le compteur et écouter en temps réel
+    _chargerCompteurNotifs();
+    _ecouterNotificationsTempsReel();
   }
 
   @override
   void dispose() {
     _animationController.dispose();
+    // ✅ Nettoyer l'abonnement temps réel
+    _notifChannel?.unsubscribe();
     super.dispose();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // ✅ NOUVEAU : Charger le nombre de notifications non lues
+  // ─────────────────────────────────────────────────────────
+  Future<void> _chargerCompteurNotifs() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null || !mounted) return;
+
+    try {
+      final result = await _supabase
+          .from('notifications')
+          .select('id')
+          .eq('destinataire_id', userId)
+          .eq('lu', false);
+
+      if (mounted) {
+        setState(() => _notifNonLues = (result as List).length);
+      }
+    } catch (e) {
+      debugPrint('⚠️ Erreur compteur notifs: $e');
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // ✅ NOUVEAU : Écoute temps réel — badge mis à jour
+  // automatiquement quand le vétérinaire envoie une notif
+  // ─────────────────────────────────────────────────────────
+  void _ecouterNotificationsTempsReel() {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    _notifChannel = _supabase
+        .channel('notifications_eleveur_$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'destinataire_id',
+            value: userId,
+          ),
+          callback: (payload) {
+            // Nouvelle notification reçue → incrémenter le badge
+            if (mounted) {
+              setState(() => _notifNonLues++);
+              // Afficher un snackbar discret
+              final titre = payload.newRecord['titre']?.toString() ?? 'Nouvelle notification';
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Row(
+                    children: [
+                      const Icon(Icons.notifications, color: Colors.white, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          titre,
+                          style: const TextStyle(fontSize: 13),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  backgroundColor: Colors.green[700],
+                  duration: const Duration(seconds: 4),
+                  action: SnackBarAction(
+                    label: 'Voir',
+                    textColor: Colors.white,
+                    onPressed: _ouvrirNotifications,
+                  ),
+                ),
+              );
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // ✅ NOUVEAU : Ouvrir la page notifications et rafraîchir le badge
+  // ─────────────────────────────────────────────────────────
+  Future<void> _ouvrirNotifications() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const NotificationsPage()),
+    );
+    // Après retour : rafraîchir le badge (l'éleveur a peut-être lu des notifs)
+    if (mounted) {
+      setState(() => _selectedIndex = 0);
+      _chargerCompteurNotifs();
+    }
   }
 
   // ===== ANIMATIONS =====
@@ -164,14 +270,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     debugPrint("📊 Chargement statistiques pour: $userId");
 
     final results = await Future.wait([
-      _supabase
-          .from('nouveaux_nee')
-          .select('sexe')
-          .eq('user_id', userId),
-      _supabase
-          .from('animal_acheter')
-          .select('sexe')
-          .eq('user_id', userId),
+      _supabase.from('nouveaux_nee').select('sexe').eq('user_id', userId),
+      _supabase.from('animal_acheter').select('sexe').eq('user_id', userId),
     ]);
 
     int males = 0;
@@ -197,7 +297,6 @@ class _interfaceElevaureState extends State<interfaceElevaur>
 
     final total = males + femelles;
     debugPrint("✅ Stats: Total=$total, Mâles=$males, Femelles=$femelles");
-
     return {'total': total, 'males': males, 'femelles': femelles};
   }
 
@@ -208,9 +307,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
             Container(
@@ -225,14 +322,11 @@ class _interfaceElevaureState extends State<interfaceElevaur>
             const Text("Déconnexion"),
           ],
         ),
-        content: const Text(
-          "Êtes-vous sûr de vouloir vous déconnecter ?",
-        ),
+        content: const Text("Êtes-vous sûr de vouloir vous déconnecter ?"),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child:
-                Text("Annuler", style: TextStyle(color: Colors.grey[600])),
+            child: Text("Annuler", style: TextStyle(color: Colors.grey[600])),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
@@ -249,18 +343,16 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     if (confirm != true) return;
 
     try {
+      _notifChannel?.unsubscribe();
       _cache.clear();
       await _supabase.auth.signOut();
       debugPrint("✅ Déconnexion réussie");
-
       navigator.pushReplacement(
         MaterialPageRoute(builder: (_) => const Connexion()),
       );
     } catch (error, stackTrace) {
       ErrorHandler.log(error, stackTrace, context: 'Déconnexion');
-      if (mounted) {
-        ErrorHandler.show(context, error);
-      }
+      if (mounted) ErrorHandler.show(context, error);
     }
   }
 
@@ -270,9 +362,10 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     if (userId != null) {
       _cache.invalidate(CacheKeys.stats(userId));
     }
-
-    await _initializeData();
-
+    await Future.wait([
+      _initializeData(),
+      _chargerCompteurNotifs(), // ✅ Rafraîchir aussi le badge
+    ]);
     if (mounted) {
       ErrorHandler.showSuccess(context, "Données actualisées");
     }
@@ -288,7 +381,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
       case 1:
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const  MonTroupeau()),
+          MaterialPageRoute(builder: (_) => const MonTroupeau()),
         ).then((_) => setState(() => _selectedIndex = 0));
         break;
       case 2:
@@ -298,10 +391,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
         ).then((_) => setState(() => _selectedIndex = 0));
         break;
       case 3:
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const NotificationsViewPage()),
-        ).then((_) => setState(() => _selectedIndex = 0));
+        // ✅ MODIFIÉ — Navigue vers les vraies notifications
+        _ouvrirNotifications();
         break;
     }
   }
@@ -313,11 +404,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
       backgroundColor: Colors.grey[50],
       appBar: _buildAppBar(),
       drawer: _buildDrawer(),
-
-      // ✅ NOUVEAU — Bouton Copilot IA flottant
       floatingActionButton: _buildCopilotFAB(),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-
       body: _isLoading
           ? _buildLoadingState()
           : RefreshIndicator(
@@ -342,7 +430,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                         _buildSectionHeader(),
                         const SizedBox(height: 12),
                         _buildOptionsGrid(),
-                        const SizedBox(height: 100), // espace pour le FAB
+                        const SizedBox(height: 100),
                       ],
                     ),
                   ),
@@ -353,7 +441,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     );
   }
 
-  // ===== COPILOT IA FAB ✅ NOUVEAU =====
+  // ===== COPILOT IA FAB =====
   Widget _buildCopilotFAB() {
     return FloatingActionButton.extended(
       heroTag: 'copilot',
@@ -362,22 +450,14 @@ class _interfaceElevaureState extends State<interfaceElevaur>
         MaterialPageRoute(builder: (_) => const CopilotPage()),
       ),
       backgroundColor: const Color(0xFF1B5E20),
-      icon: const Icon(
-        Icons.smart_toy_outlined,
-        color: Colors.white,
-      ),
+      icon: const Icon(Icons.smart_toy_outlined, color: Colors.white),
       label: const Text(
         'Copilot IA',
         style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w600,
-          fontSize: 14,
-        ),
+            color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
       ),
       elevation: 4,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     );
   }
 
@@ -393,6 +473,46 @@ class _interfaceElevaureState extends State<interfaceElevaur>
       foregroundColor: Couleur.PremierColor,
       elevation: 2,
       iconTheme: IconThemeData(color: Couleur.PremierColor),
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 16),
+          child: IconButton(
+            // ✅ MODIFIÉ — Badge dynamique réel (plus le '2' statique)
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.notifications_outlined, color: Colors.blue[700]),
+                if (_notifNonLues > 0)
+                  Positioned(
+                    right: -4,
+                    top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
+                      child: Text(
+                        _notifNonLues > 99 ? '99+' : '$_notifNonLues',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            // ✅ MODIFIÉ — Ouvre la vraie page notifications
+            onPressed: _ouvrirNotifications,
+          ),
+        ),
+      ],
     );
   }
 
@@ -419,14 +539,10 @@ class _interfaceElevaureState extends State<interfaceElevaur>
           backgroundColor: Colors.white,
           selectedItemColor: Couleur.PremierColor,
           unselectedItemColor: Colors.grey[400],
-          selectedLabelStyle: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 11,
-          ),
-          unselectedLabelStyle: const TextStyle(
-            fontWeight: FontWeight.w400,
-            fontSize: 11,
-          ),
+          selectedLabelStyle:
+              const TextStyle(fontWeight: FontWeight.w700, fontSize: 11),
+          unselectedLabelStyle:
+              const TextStyle(fontWeight: FontWeight.w400, fontSize: 11),
           elevation: 0,
           items: [
             BottomNavigationBarItem(
@@ -445,7 +561,35 @@ class _interfaceElevaureState extends State<interfaceElevaur>
               label: "Ajouter",
             ),
             BottomNavigationBarItem(
-              icon: _navIcon(Icons.notifications_outlined, 3),
+              // ✅ MODIFIÉ — Badge dynamique sur l'onglet Alertes
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  _navIcon(Icons.notifications_outlined, 3),
+                  if (_notifNonLues > 0)
+                    Positioned(
+                      right: -6,
+                      top: -2,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        constraints: const BoxConstraints(
+                            minWidth: 15, minHeight: 15),
+                        child: Text(
+                          _notifNonLues > 9 ? '9+' : '$_notifNonLues',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
               activeIcon: _navIconActive(Icons.notifications, 3),
               label: "Alertes",
             ),
@@ -482,10 +626,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
         children: [
           CircularProgressIndicator(color: Couleur.PremierColor),
           const SizedBox(height: 16),
-          Text(
-            "Chargement...",
-            style: TextStyle(color: Couleur.PremierColor, fontSize: 16),
-          ),
+          Text("Chargement...",
+              style: TextStyle(color: Couleur.PremierColor, fontSize: 16)),
         ],
       ),
     );
@@ -522,18 +664,15 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                 Text(
                   "Bonjour, $_userName! 👋",
                   style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   "Bienvenue sur votre tableau de bord",
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
-                    fontSize: 14,
-                  ),
+                      color: Colors.white.withOpacity(0.9), fontSize: 14),
                 ),
               ],
             ),
@@ -550,29 +689,26 @@ class _interfaceElevaureState extends State<interfaceElevaur>
       children: [
         Expanded(
           child: _buildStatCard(
-            icon: Icons.pets,
-            label: "Total",
-            value: "$_totalAnimaux",
-            color: Colors.blue,
-          ),
+              icon: Icons.pets,
+              label: "Total",
+              value: "$_totalAnimaux",
+              color: Colors.blue),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: _buildStatCard(
-            icon: Icons.male,
-            label: "Mâles",
-            value: "$_nombreMales",
-            color: Colors.green,
-          ),
+              icon: Icons.male,
+              label: "Mâles",
+              value: "$_nombreMales",
+              color: Colors.green),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: _buildStatCard(
-            icon: Icons.female,
-            label: "Femelles",
-            value: "$_nombreFemelles",
-            color: Colors.pink,
-          ),
+              icon: Icons.female,
+              label: "Femelles",
+              value: "$_nombreFemelles",
+              color: Colors.pink),
         ),
       ],
     );
@@ -600,29 +736,21 @@ class _interfaceElevaureState extends State<interfaceElevaur>
           Container(
             padding: const EdgeInsets.all(8),
             decoration: const BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
+                color: Colors.white, shape: BoxShape.circle),
             child: Icon(icon, size: 32, color: color[700]),
           ),
           const SizedBox(height: 12),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: color[900],
-            ),
-          ),
+          Text(value,
+              style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: color[900])),
           const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: color[700],
-            ),
-          ),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: color[700])),
         ],
       ),
     );
@@ -663,49 +791,35 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        "Infos Animal RFID",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 19,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      const Text("Infos Animal RFID",
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 19,
+                              fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
-                      Text(
-                        "Scannez facilement",
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.9),
-                          fontSize: 14,
-                        ),
-                      ),
+                      Text("Scannez facilement",
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.9),
+                              fontSize: 14)),
                     ],
                   ),
                   ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
                           builder: (context) =>
-                              const AnimalInfoRFIDPageBluetooth(),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.nfc, size: 20),
-                    label: const Text(
-                      "Scanner",
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                              const AnimalInfoRFIDPageBluetooth()),
                     ),
+                    icon: const Icon(Icons.nfc, size: 20),
+                    label: const Text("Scanner",
+                        style: TextStyle(fontWeight: FontWeight.bold)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: Couleur.PremierColor,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 15,
-                      ),
+                          horizontal: 20, vertical: 15),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
+                          borderRadius: BorderRadius.circular(30)),
                     ),
                   ),
                 ],
@@ -718,11 +832,8 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                 "assets/image/img10.png",
                 width: 100,
                 fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => Icon(
-                  Icons.pets,
-                  size: 100,
-                  color: Colors.white.withOpacity(0.5),
-                ),
+                errorBuilder: (_, __, ___) => Icon(Icons.pets,
+                    size: 100, color: Colors.white.withOpacity(0.5)),
               ),
             ),
           ],
@@ -736,17 +847,11 @@ class _interfaceElevaureState extends State<interfaceElevaur>
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        const Text(
-          'Gestion du troupeau',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
+        const Text('Gestion du troupeau',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         TextButton.icon(
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const MonTroupeau()),
-            );
-          },
+          onPressed: () => Navigator.push(context,
+              MaterialPageRoute(builder: (context) => const MonTroupeau())),
           icon: const Icon(Icons.arrow_forward, size: 16),
           label: const Text("Voir tout"),
           style: TextButton.styleFrom(foregroundColor: Couleur.PremierColor),
@@ -845,19 +950,15 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                   child: Icon(Icons.person, size: 40, color: Colors.green),
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  _userName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  _userEmail,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  overflow: TextOverflow.ellipsis,
-                ),
+                Text(_userName,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold)),
+                Text(_userEmail,
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 12),
+                    overflow: TextOverflow.ellipsis),
               ],
             ),
           ),
@@ -870,35 +971,83 @@ class _interfaceElevaureState extends State<interfaceElevaur>
             },
           ),
           const Divider(),
-          // ✅ NOUVEAU — Accès Copilot depuis le Drawer aussi
+          // ✅ NOUVEAU — Notifications dans le Drawer avec badge
           ListTile(
-            leading: const Icon(
-              Icons.smart_toy_outlined,
-              color: Color(0xFF1B5E20),
+            leading: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.notifications_outlined, color: Colors.blue[700]),
+                if (_notifNonLues > 0)
+                  Positioned(
+                    right: -4,
+                    top: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                          color: Colors.red, shape: BoxShape.circle),
+                      child: Text(
+                        '$_notifNonLues',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-            title: const Text(
-              "Copilot IA",
-              style: TextStyle(
-                color: Color(0xFF1B5E20),
-                fontWeight: FontWeight.w600,
-              ),
+            title: Row(
+              children: [
+                const Text('Notifications'),
+                if (_notifNonLues > 0) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '$_notifNonLues',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ],
             ),
+            subtitle: _notifNonLues > 0
+                ? Text('$_notifNonLues non lue${_notifNonLues > 1 ? 's' : ''}',
+                    style: const TextStyle(color: Colors.red, fontSize: 12))
+                : const Text('Aucune nouvelle notification'),
+            onTap: () {
+              Navigator.pop(context);
+              _ouvrirNotifications();
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.smart_toy_outlined,
+                color: Color(0xFF1B5E20)),
+            title: const Text("Copilot IA",
+                style: TextStyle(
+                    color: Color(0xFF1B5E20),
+                    fontWeight: FontWeight.w600)),
             subtitle: const Text("Assistant élevage intelligent"),
             onTap: () {
               Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const CopilotPage()),
-              );
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const CopilotPage()));
             },
           ),
           const Divider(),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.red),
-            title: const Text(
-              "Déconnexion",
-              style: TextStyle(color: Colors.red),
-            ),
+            title: const Text("Déconnexion",
+                style: TextStyle(color: Colors.red)),
             onTap: _handleLogout,
           ),
         ],

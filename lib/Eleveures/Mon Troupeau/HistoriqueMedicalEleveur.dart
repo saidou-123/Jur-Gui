@@ -2,229 +2,77 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ============================================================
-// HISTORIQUE MÉDICAL - VERSION ÉLEVEUR (LECTURE SEULE)
-// VERSION CORRIGÉE - Compatible avec votre structure users
+// HISTORIQUE MÉDICAL ÉLEVEUR (LECTURE SEULE)
+// ✅ ÉTAPE 2 : Zéro requête N+1 — utilise la vue SQL
+//    historique_medical_complet (1 seule requête au lieu de N*2)
+// ✅ ÉTAPE 1 : Filtrage sécurisé par eleveur_id
 // ============================================================
 class HistoriqueMedicalEleveur extends StatefulWidget {
   const HistoriqueMedicalEleveur({super.key});
 
   @override
-  State<HistoriqueMedicalEleveur> createState() => _HistoriqueMedicalEleveurState();
+  State<HistoriqueMedicalEleveur> createState() =>
+      _HistoriqueMedicalEleveurState();
 }
 
-class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
+class _HistoriqueMedicalEleveurState
+    extends State<HistoriqueMedicalEleveur> {
   final supabase = Supabase.instance.client;
   List<Map<String, dynamic>> _historique = [];
   bool _isLoading = true;
   String _filtre = 'Tout';
+  String? _eleveurId;
 
   @override
   void initState() {
     super.initState();
+    _eleveurId = supabase.auth.currentUser?.id;
     _chargerHistorique();
   }
 
   Future<void> _chargerHistorique() async {
     if (!mounted) return;
 
+    if (_eleveurId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ Session expirée. Veuillez vous reconnecter.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
-      final userId = supabase.auth.currentUser?.id;
-      if (userId == null) throw Exception("Non connecté");
-
-      List<Map<String, dynamic>> historique = [];
-
-      // ========== CHARGER CONSULTATIONS ==========
-      final consultationsResponse = await supabase
-          .from('consultations')
-          .select('*')
-          .order('date_consultation', ascending: false);
-
-      for (var consultation in consultationsResponse) {
-        try {
-          String animalNom = "Animal inconnu";
-          String animalRace = "";
-          
-          // Récupérer les infos de l'animal selon la source
-          if (consultation['source'] == 'nee') {
-            final animalData = await supabase
-                .from('nouveaux_nee')
-                .select('nom, race')
-                .eq('id', consultation['animal_id'])
-                .maybeSingle();
-            
-            if (animalData != null) {
-              animalNom = animalData['nom'] ?? 'Animal inconnu';
-              animalRace = animalData['race'] ?? '';
-            }
-          } else if (consultation['source'] == 'achete') {
-            final animalData = await supabase
-                .from('animal_acheter')
-                .select('nom, race')
-                .eq('id', consultation['animal_id'])
-                .maybeSingle();
-            
-            if (animalData != null) {
-              animalNom = animalData['nom'] ?? 'Animal inconnu';
-              animalRace = animalData['race'] ?? '';
-            }
-          }
-
-          // Récupérer le nom du vétérinaire (gère plusieurs formats possibles)
-          String veterinaireName = "Dr. Inconnu";
-          try {
-            final vetData = await supabase
-                .from('users')
-                .select('*')
-                .eq('id', consultation['veterinaire_id'])
-                .maybeSingle();
-            
-            if (vetData != null) {
-              // Essayer plusieurs colonnes possibles
-              veterinaireName = vetData['nom_complet'] ?? 
-                                vetData['full_name'] ?? 
-                                vetData['name'] ??
-                                (vetData['prenom'] != null && vetData['nom'] != null 
-                                  ? '${vetData['prenom']} ${vetData['nom']}'
-                                  : vetData['email']?.split('@')[0] ?? 'Dr. Inconnu');
-            }
-          } catch (e) {
-            debugPrint("Erreur récupération vétérinaire: $e");
-          }
-
-          // Formater la date
-          String dateFormatted = "Date inconnue";
-          try {
-            final dateTime = DateTime.parse(consultation['date_consultation'].toString());
-            dateFormatted = "${dateTime.day.toString().padLeft(2, '0')}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.year}";
-          } catch (e) {
-            debugPrint("Erreur format date: $e");
-          }
-
-          historique.add({
-            'type': 'consultation',
-            'date': dateFormatted,
-            'date_sort': consultation['date_consultation'],
-            'animal_nom': animalNom,
-            'animal_race': animalRace,
-            'titre': consultation['motif'] ?? 'Consultation',
-            'description': consultation['examen_clinique'] ?? 'Examen général',
-            'veterinaire': veterinaireName,
-            'diagnostic': consultation['diagnostic'] ?? 'Non spécifié',
-            'traitement': consultation['traitement'] ?? 'Non spécifié',
-            'observations': consultation['observations'] ?? '',
-          });
-        } catch (e) {
-          debugPrint("Erreur traitement consultation: $e");
-        }
-      }
-
-      // ========== CHARGER VACCINATIONS ==========
-      final vaccinationsResponse = await supabase
-          .from('vaccinations')
-          .select('*')
-          .order('date_vaccination', ascending: false);
-
-      for (var vaccination in vaccinationsResponse) {
-        try {
-          String animalNom = "Animal inconnu";
-          String animalRace = "";
-          
-          if (vaccination['source'] == 'nee') {
-            final animalData = await supabase
-                .from('nouveaux_nee')
-                .select('nom, race')
-                .eq('id', vaccination['animal_id'])
-                .maybeSingle();
-            
-            if (animalData != null) {
-              animalNom = animalData['nom'] ?? 'Animal inconnu';
-              animalRace = animalData['race'] ?? '';
-            }
-          } else if (vaccination['source'] == 'achete') {
-            final animalData = await supabase
-                .from('animal_acheter')
-                .select('nom, race')
-                .eq('id', vaccination['animal_id'])
-                .maybeSingle();
-            
-            if (animalData != null) {
-              animalNom = animalData['nom'] ?? 'Animal inconnu';
-              animalRace = animalData['race'] ?? '';
-            }
-          }
-
-          // Récupérer le nom du vétérinaire (gère plusieurs formats)
-          String veterinaireName = "Dr. Inconnu";
-          try {
-            final vetData = await supabase
-                .from('users')
-                .select('*')
-                .eq('id', vaccination['veterinaire_id'])
-                .maybeSingle();
-            
-            if (vetData != null) {
-              veterinaireName = vetData['nom_complet'] ?? 
-                                vetData['full_name'] ?? 
-                                vetData['name'] ??
-                                (vetData['prenom'] != null && vetData['nom'] != null 
-                                  ? '${vetData['prenom']} ${vetData['nom']}'
-                                  : vetData['email']?.split('@')[0] ?? 'Dr. Inconnu');
-            }
-          } catch (e) {
-            debugPrint("Erreur récupération vétérinaire: $e");
-          }
-
-          // Formater les dates
-          String dateVaccination = _formatDate(vaccination['date_vaccination'].toString());
-          String dateRappel = vaccination['date_rappel'] != null 
-              ? _formatDate(vaccination['date_rappel'].toString())
-              : 'Aucun rappel';
-
-          historique.add({
-            'type': 'vaccination',
-            'date': dateVaccination,
-            'date_sort': vaccination['date_vaccination'],
-            'animal_nom': animalNom,
-            'animal_race': animalRace,
-            'titre': 'Vaccination ${vaccination['nom_vaccin']}',
-            'description': 'Rappel prévu le $dateRappel',
-            'veterinaire': veterinaireName,
-            'nom_vaccin': vaccination['nom_vaccin'],
-            'date_rappel': dateRappel,
-            'lot': vaccination['lot'] ?? 'N/A',
-            'observations': vaccination['observations'] ?? '',
-          });
-        } catch (e) {
-          debugPrint("Erreur traitement vaccination: $e");
-        }
-      }
-
-      // Trier par date (plus récent en premier)
-      historique.sort((a, b) {
-        try {
-          final dateA = DateTime.parse(a['date_sort'].toString());
-          final dateB = DateTime.parse(b['date_sort'].toString());
-          return dateB.compareTo(dateA);
-        } catch (e) {
-          return 0;
-        }
-      });
+      // ✅ UNE SEULE REQUÊTE grâce à la vue SQL
+      // La vue contient eleveur_id calculé depuis nouveaux_nee.user_id
+      // ou animal_acheter.user_id selon la source de l'animal
+      // Avant : boucles avec N*2 requêtes supplémentaires
+      // Après : 1 requête filtrée = résultat instantané
+      final data = await supabase
+          .from('historique_medical_complet')
+          .select()
+          .eq('eleveur_id', _eleveurId!) // ✅ sécurité : seulement ses animaux
+          .order('date_acte', ascending: false);
 
       if (mounted) {
         setState(() {
-          _historique = historique;
+          _historique = List<Map<String, dynamic>>.from(data);
           _isLoading = false;
         });
       }
     } catch (e) {
-      debugPrint("Erreur chargement historique: $e");
+      debugPrint('❌ Erreur chargement historique éleveur: $e');
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Erreur de chargement: ${e.toString()}"),
+            content: Text('Erreur: ${e.toString()}'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 5),
           ),
@@ -233,89 +81,101 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
     }
   }
 
-  String _formatDate(String dateString) {
-    try {
-      final dateTime = DateTime.parse(dateString);
-      return "${dateTime.day.toString().padLeft(2, '0')}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.year}";
-    } catch (e) {
-      return dateString;
-    }
-  }
-
   List<Map<String, dynamic>> get _historiqueFiltre {
     if (_filtre == 'Tout') return _historique;
     if (_filtre == 'Consultations') {
-      return _historique.where((item) => item['type'] == 'consultation').toList();
+      return _historique
+          .where((item) => item['type_acte'] == 'consultation')
+          .toList();
     }
     if (_filtre == 'Vaccinations') {
-      return _historique.where((item) => item['type'] == 'vaccination').toList();
+      return _historique
+          .where((item) => item['type_acte'] == 'vaccination')
+          .toList();
     }
     return _historique;
+  }
+
+  String _formatDate(String? iso) {
+    if (iso == null || iso.isEmpty) return 'Date inconnue';
+    try {
+      final dt = DateTime.parse(iso);
+      return '${dt.day.toString().padLeft(2, '0')}/'
+          '${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+    } catch (_) {
+      return iso;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Historique Médical"),
+        title: const Text('Historique Médical'),
         backgroundColor: Colors.green[700],
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
+          if (!_isLoading)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  '${_historique.length} acte(s)',
+                  style:
+                      const TextStyle(fontSize: 13, color: Colors.white70),
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _chargerHistorique,
-            tooltip: "Actualiser",
           ),
         ],
       ),
       body: Column(
         children: [
-          // Bannière info lecture seule
+          // Bannière sécurité + performance
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            color: Colors.blue[50],
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: Colors.green[50],
             child: Row(
               children: [
-                Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
+                Icon(Icons.verified_user,
+                    color: Colors.green[700], size: 16),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    "👁️ Mode consultation : Vous pouvez voir l'historique médical de vos animaux",
+                    '🔒 Affichage limité à vos animaux — chargement optimisé',
                     style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.blue[900],
-                      fontWeight: FontWeight.w500,
-                    ),
+                        fontSize: 12,
+                        color: Colors.green[900],
+                        fontWeight: FontWeight.w500),
                   ),
                 ),
               ],
             ),
           ),
 
-          // Filtres
           _buildFilterChips(),
 
-          // Compteur
           if (!_isLoading && _historiqueFiltre.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  Text(
-                    "${_historiqueFiltre.length} enregistrement${_historiqueFiltre.length > 1 ? 's' : ''}",
-                    style: TextStyle(
-                      fontSize: 14,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Row(children: [
+                Text(
+                  '${_historiqueFiltre.length} enregistrement${_historiqueFiltre.length > 1 ? 's' : ''}',
+                  style: TextStyle(
+                      fontSize: 13,
                       color: Colors.grey[600],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
+                      fontWeight: FontWeight.w500),
+                ),
+              ]),
             ),
 
-          // Liste historique
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -326,10 +186,8 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
                         child: ListView.builder(
                           padding: const EdgeInsets.all(16),
                           itemCount: _historiqueFiltre.length,
-                          itemBuilder: (context, index) {
-                            final item = _historiqueFiltre[index];
-                            return _buildHistoriqueItem(item);
-                          },
+                          itemBuilder: (context, index) => _buildItem(
+                              _historiqueFiltre[index], index),
                         ),
                       ),
           ),
@@ -340,22 +198,19 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
 
   Widget _buildFilterChips() {
     final filtres = ['Tout', 'Consultations', 'Vaccinations'];
-    
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          children: filtres.map((filtre) {
-            final isSelected = _filtre == filtre;
+          children: filtres.map((f) {
+            final isSelected = _filtre == f;
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: FilterChip(
-                label: Text(filtre),
+                label: Text(f),
                 selected: isSelected,
-                onSelected: (selected) {
-                  setState(() => _filtre = filtre);
-                },
+                onSelected: (_) => setState(() => _filtre = f),
                 selectedColor: Colors.green[200],
                 checkmarkColor: Colors.green[900],
               ),
@@ -366,32 +221,20 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
     );
   }
 
-  Widget _buildHistoriqueItem(Map<String, dynamic> item) {
-    Color couleur;
-    IconData icone;
-    
-    switch (item['type']) {
-      case 'consultation':
-        couleur = Colors.green;
-        icone = Icons.medical_services;
-        break;
-      case 'vaccination':
-        couleur = Colors.blue;
-        icone = Icons.vaccines;
-        break;
-      default:
-        couleur = Colors.grey;
-        icone = Icons.help_outline;
-    }
+  Widget _buildItem(Map<String, dynamic> item, int index) {
+    final isConsultation = item['type_acte'] == 'consultation';
+    final couleur = isConsultation ? Colors.green : Colors.blue;
+    final icone =
+        isConsultation ? Icons.medical_services : Icons.vaccines;
+    final isLast = index == _historiqueFiltre.length - 1;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
-        onTap: () => _showDetailDialog(item),
+        onTap: () => _showDetail(item),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -409,17 +252,15 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
                     ),
                     child: Icon(icone, color: couleur, size: 24),
                   ),
-                  if (_historiqueFiltre.indexOf(item) < _historiqueFiltre.length - 1)
+                  if (!isLast)
                     Container(
-                      width: 2,
-                      height: 40,
-                      margin: const EdgeInsets.only(top: 4),
-                      color: couleur.withOpacity(0.3),
-                    ),
+                        width: 2,
+                        height: 40,
+                        margin: const EdgeInsets.only(top: 4),
+                        color: couleur.withOpacity(0.3)),
                 ],
               ),
               const SizedBox(width: 16),
-              
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -428,79 +269,66 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          item['date'],
+                          _formatDate(item['date_acte']?.toString()),
                           style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                            fontWeight: FontWeight.w500,
-                          ),
+                              fontSize: 12, color: Colors.grey[600]),
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
                             color: couleur.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
-                            item['type'] == 'consultation' ? 'CONSULTATION' : 'VACCINATION',
+                            isConsultation
+                                ? 'CONSULTATION'
+                                : 'VACCINATION',
                             style: TextStyle(
-                              fontSize: 10,
-                              color: couleur,
-                              fontWeight: FontWeight.bold,
-                            ),
+                                fontSize: 10,
+                                color: couleur,
+                                fontWeight: FontWeight.bold),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      item['titre'],
+                      item['titre'] ?? 'Sans titre',
                       style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+                          fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        const Text("🐑 ", style: TextStyle(fontSize: 14)),
-                        Text(
-                          item['animal_nom'],
-                          style: TextStyle(
+                    Row(children: [
+                      const Text('🐑 '),
+                      Text(
+                        item['animal_nom'] ?? 'Inconnu',
+                        style: TextStyle(
                             fontSize: 14,
                             color: Colors.grey[700],
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        if (item['animal_race'] != null && item['animal_race'].toString().isNotEmpty) ...[
-                          Text(
-                            " (${item['animal_race']})",
+                            fontWeight: FontWeight.w600),
+                      ),
+                      if (item['animal_race'] != null &&
+                          item['animal_race'].toString().isNotEmpty)
+                        Text(' (${item['animal_race']})',
                             style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
+                                fontSize: 13, color: Colors.grey[600])),
+                    ]),
                     const SizedBox(height: 4),
                     Text(
-                      item['description'],
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey[600],
-                      ),
+                      item['description'] ?? '',
+                      style:
+                          TextStyle(fontSize: 13, color: Colors.grey[600]),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     Text(
-                      "👨‍⚕️ ${item['veterinaire']}",
+                      '👨‍⚕️ ${item['veterinaire_nom'] ?? 'Dr. Inconnu'}',
                       style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[500],
-                        fontStyle: FontStyle.italic,
-                      ),
+                          fontSize: 12,
+                          color: Colors.grey[500],
+                          fontStyle: FontStyle.italic),
                     ),
                   ],
                 ),
@@ -513,59 +341,43 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
   }
 
   Widget _buildEmptyState() {
-    String message;
+    String msg;
     if (_filtre == 'Consultations') {
-      message = "Aucune consultation enregistrée";
+      msg = 'Aucune consultation enregistrée';
     } else if (_filtre == 'Vaccinations') {
-      message = "Aucune vaccination enregistrée";
+      msg = 'Aucune vaccination enregistrée';
     } else {
-      message = "Aucun historique médical";
+      msg = 'Aucun historique médical';
     }
-
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.medical_information, size: 80, color: Colors.grey[400]),
+          Icon(Icons.medical_information,
+              size: 80, color: Colors.grey[400]),
           const SizedBox(height: 16),
-          Text(
-            message,
-            style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-          ),
+          Text(msg,
+              style: TextStyle(fontSize: 18, color: Colors.grey[600])),
           const SizedBox(height: 8),
-          Text(
-            "Les soins vétérinaires apparaîtront ici",
-            style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-          ),
+          Text('Les soins vétérinaires apparaîtront ici',
+              style:
+                  TextStyle(fontSize: 14, color: Colors.grey[500])),
         ],
       ),
     );
   }
 
-  void _showDetailDialog(Map<String, dynamic> item) {
-    Color couleur;
-    IconData icone;
-    
-    switch (item['type']) {
-      case 'consultation':
-        couleur = Colors.green;
-        icone = Icons.medical_services;
-        break;
-      case 'vaccination':
-        couleur = Colors.blue;
-        icone = Icons.vaccines;
-        break;
-      default:
-        couleur = Colors.grey;
-        icone = Icons.help_outline;
-    }
+  void _showDetail(Map<String, dynamic> item) {
+    final isConsultation = item['type_acte'] == 'consultation';
+    final couleur = isConsultation ? Colors.green : Colors.blue;
+    final icone =
+        isConsultation ? Icons.medical_services : Icons.vaccines;
 
     showDialog(
       context: context,
       builder: (context) => Dialog(
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+            borderRadius: BorderRadius.circular(16)),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -586,168 +398,105 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        item['titre'],
+                        item['titre'] ?? 'Détail',
                         style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: couleur,
-                        ),
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: couleur),
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(context),
-                    ),
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context)),
                   ],
                 ),
               ),
 
-              // Contenu
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Bannière lecture seule
                     Container(
-                      padding: const EdgeInsets.all(12),
-                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(10),
+                      margin: const EdgeInsets.only(bottom: 14),
                       decoration: BoxDecoration(
                         color: Colors.blue[50],
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.blue[200]!, width: 1),
+                        border: Border.all(color: Colors.blue[200]!),
                       ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.visibility, color: Colors.blue[700], size: 18),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              "Consultation uniquement - Vous ne pouvez pas modifier ces informations",
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.blue[900],
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
+                      child: Row(children: [
+                        Icon(Icons.visibility,
+                            color: Colors.blue[700], size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Mode consultation — vous ne pouvez pas modifier ces informations',
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.blue[900]),
                           ),
-                        ],
-                      ),
+                        ),
+                      ]),
                     ),
 
-                    _buildDetailRow("Date", item['date'], Icons.calendar_today),
-                    _buildDetailRow("Animal", "${item['animal_nom']}${item['animal_race'] != null && item['animal_race'].toString().isNotEmpty ? ' (${item['animal_race']})' : ''}", Icons.pets),
-                    _buildDetailRow("Vétérinaire", item['veterinaire'], Icons.person),
-                    
-                    // Détails spécifiques aux consultations
-                    if (item['type'] == 'consultation') ...[
-                      if (item['diagnostic'] != null && item['diagnostic'].toString().isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        const Text(
-                          "Diagnostic :",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.green[50],
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.green[200]!),
-                          ),
-                          child: Text(
-                            item['diagnostic'],
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                        ),
-                      ],
-                      
-                      if (item['traitement'] != null && item['traitement'].toString().isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        const Text(
-                          "Traitement :",
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.orange[50],
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.orange[200]!),
-                          ),
-                          child: Text(
-                            item['traitement'],
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                        ),
-                      ],
+                    _detailRow('Date',
+                        _formatDate(item['date_acte']?.toString()),
+                        Icons.calendar_today),
+                    _detailRow(
+                        'Animal',
+                        '${item['animal_nom'] ?? 'Inconnu'}'
+                            '${item['animal_race'] != null && item['animal_race'].toString().isNotEmpty ? ' (${item['animal_race']})' : ''}',
+                        Icons.pets),
+                    _detailRow('Vétérinaire',
+                        item['veterinaire_nom'] ?? 'Dr. Inconnu',
+                        Icons.person),
+
+                    if (isConsultation) ...[
+                      if (item['diagnostic'] != null &&
+                          item['diagnostic'].toString().isNotEmpty)
+                        _sectionBox('Diagnostic', item['diagnostic'],
+                            Colors.green),
+                      if (item['traitement'] != null &&
+                          item['traitement'].toString().isNotEmpty)
+                        _sectionBox('Traitement', item['traitement'],
+                            Colors.orange),
+                    ] else ...[
+                      const SizedBox(height: 8),
+                      _detailRow('Vaccin',
+                          item['nom_vaccin'] ?? 'N/A', Icons.vaccines),
+                      _detailRow(
+                          'Date rappel',
+                          _formatDate(
+                              item['date_rappel']?.toString()),
+                          Icons.event_repeat),
+                      if (item['lot'] != null && item['lot'] != 'N/A')
+                        _detailRow(
+                            'N° de lot', item['lot'], Icons.tag),
                     ],
 
-                    // Détails spécifiques aux vaccinations
-                    if (item['type'] == 'vaccination') ...[
-                      const SizedBox(height: 12),
-                      _buildDetailRow("Vaccin", item['nom_vaccin'], Icons.medical_information),
-                      _buildDetailRow("Date rappel", item['date_rappel'], Icons.event_repeat),
-                      if (item['lot'] != null && item['lot'].toString() != 'N/A')
-                        _buildDetailRow("Numéro de lot", item['lot'], Icons.qr_code),
-                    ],
-                    
-                    // Observations (pour les deux types)
-                    if (item['observations'] != null && item['observations'].toString().isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      const Text(
-                        "Observations :",
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey[300]!),
-                        ),
-                        child: Text(
-                          item['observations'],
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                      ),
-                    ],
+                    if (item['observations'] != null &&
+                        item['observations'].toString().isNotEmpty)
+                      _sectionBox('Observations',
+                          item['observations'], Colors.grey),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: () => Navigator.pop(context),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: couleur,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
+                              borderRadius: BorderRadius.circular(8)),
                         ),
-                        child: const Text(
-                          "Fermer",
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
+                        child: const Text('Fermer',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white)),
                       ),
                     ),
                   ],
@@ -760,7 +509,7 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
     );
   }
 
-  Widget _buildDetailRow(String label, String value, IconData icon) {
+  Widget _detailRow(String label, String value, IconData icon) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -772,27 +521,41 @@ class _HistoriqueMedicalEleveurState extends State<HistoriqueMedicalEleveur> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 12, color: Colors.grey[600])),
                 const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                Text(value,
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w600)),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _sectionBox(String titre, String contenu, Color couleur) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        Text('$titre :',
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 15)),
+        const SizedBox(height: 6),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: couleur.withOpacity(0.07),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: couleur.withOpacity(0.3)),
+          ),
+          child: Text(contenu, style: const TextStyle(fontSize: 14)),
+        ),
+      ],
     );
   }
 }
