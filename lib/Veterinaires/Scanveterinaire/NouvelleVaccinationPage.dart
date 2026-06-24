@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ============================================================
 // NOUVELLE VACCINATION
-// ✅ ÉTAPE 3 : Notification automatique à l'éleveur après enregistrement
+// ✅ Notification in-app + Push FCM après enregistrement
 // ============================================================
 class NouvelleVaccinationPage extends StatefulWidget {
   final Map<String, dynamic> animal;
@@ -53,9 +53,7 @@ class _NouvelleVaccinationPageState
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────
-  // ✅ NOUVEAU : Récupérer l'ID de l'éleveur propriétaire
-  // ─────────────────────────────────────────────────────────
+  // ─── Récupérer l'ID de l'éleveur propriétaire ───────────
   Future<String?> _getEleveurId() async {
     try {
       final table =
@@ -67,20 +65,18 @@ class _NouvelleVaccinationPageState
           .maybeSingle();
       return result?['user_id']?.toString();
     } catch (e) {
-      debugPrint('❌ Erreur récupération éleveur: $e');
+      debugPrint('Erreur récupération éleveur: $e');
       return null;
     }
   }
 
-  // ─────────────────────────────────────────────────────────
-  // ✅ NOUVEAU : Envoyer une notification à l'éleveur
-  // ─────────────────────────────────────────────────────────
-  Future<void> _notifierEleveur({
+  // ─── Notification in-app (table notifications) ───────────
+  Future<void> _notifierEleveurInApp({
     required String eleveurId,
     required String veterinaireId,
     required String nomAnimal,
     required String nomVaccin,
-    String? dateRappel,
+    String? dateRappelFormatee,
   }) async {
     try {
       final vetData = await supabase
@@ -99,8 +95,8 @@ class _NouvelleVaccinationPageState
 
       String corps =
           '$nomVet a effectué une vaccination.\nVaccin : $nomVaccin';
-      if (dateRappel != null) {
-        corps += '\n🔔 Rappel prévu le : $dateRappel';
+      if (dateRappelFormatee != null) {
+        corps += '\nRappel prévu le : $dateRappelFormatee';
       }
       corps += '\nConsultez l\'historique médical pour les détails.';
 
@@ -108,18 +104,57 @@ class _NouvelleVaccinationPageState
         'destinataire_id': eleveurId,
         'expediteur_id': veterinaireId,
         'type': 'nouvelle_vaccination',
-        'titre': '💉 Vaccination enregistrée pour $nomAnimal',
+        'titre': 'Vaccination enregistrée pour $nomAnimal',
         'corps': corps,
         'animal_id': widget.animal['id'].toString(),
         'animal_source': widget.source,
         'lu': false,
         'created_at': DateTime.now().toIso8601String(),
       });
-
-      debugPrint('✅ Notification vaccination envoyée à l\'éleveur');
+      debugPrint('Notification in-app vaccination envoyée à $eleveurId');
     } catch (e) {
-      debugPrint('⚠️ Notification non envoyée: $e');
+      debugPrint('Notification in-app non envoyée: $e');
     }
+  }
+
+  // ─── Push FCM (Edge Function Supabase) ───────────────────
+  Future<void> _envoyerPushFCM({
+    required String eleveurId,
+    required String nomAnimal,
+    required String nomVaccin,
+    String? dateRappelFormatee,
+  }) async {
+    try {
+      final titre = 'Vaccination — $nomAnimal';
+      String corps = 'Vaccination enregistrée : $nomVaccin.';
+      if (dateRappelFormatee != null) {
+        corps += ' Rappel le $dateRappelFormatee.';
+      }
+      corps += ' Ouvrez l\'app pour les détails.';
+
+      await supabase.functions.invoke(
+        'send-push-notification',
+        body: {
+          'user_id': eleveurId,
+          'title': titre,
+          'body': corps,
+          'type': 'nouvelle_vaccination',
+          'channel': 'alerte_channel',
+          'data': {
+            'animal_id': widget.animal['id'].toString(),
+            'source': widget.source,
+          },
+        },
+      );
+      debugPrint('Push FCM vaccination envoyé à $eleveurId');
+    } catch (e) {
+      debugPrint('Push FCM non envoyé (silencieux): $e');
+    }
+  }
+
+  String _formaterDate(DateTime date) {
+    return '${date.day.toString().padLeft(2, '0')}/'
+        '${date.month.toString().padLeft(2, '0')}/${date.year}';
   }
 
   Future<void> _enregistrerVaccination() async {
@@ -133,7 +168,7 @@ class _NouvelleVaccinationPageState
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content:
-                  Text('❌ Session expirée. Veuillez vous reconnecter.'),
+                  Text('Session expirée. Veuillez vous reconnecter.'),
               backgroundColor: Colors.red,
             ),
           );
@@ -167,19 +202,30 @@ class _NouvelleVaccinationPageState
       // 1. Enregistrer la vaccination
       await supabase.from('vaccinations').insert(data);
 
-      // 2. ✅ NOUVEAU : Notifier l'éleveur en arrière-plan
+      // 2. Récupérer l'éleveur et notifier
       final eleveurId = await _getEleveurId();
       if (eleveurId != null) {
-        await _notifierEleveur(
+        final nomAnimal =
+            widget.animal['nom']?.toString() ?? 'votre animal';
+        final nomVaccin = _vaccController.text.trim();
+        final dateRappelFormatee =
+            _dateRappel != null ? _formaterDate(_dateRappel!) : null;
+
+        // 2a. Notification in-app
+        await _notifierEleveurInApp(
           eleveurId: eleveurId,
           veterinaireId: veterinaire.id,
-          nomAnimal: widget.animal['nom'] ?? 'votre animal',
-          nomVaccin: _vaccController.text.trim(),
-          dateRappel: _dateRappel != null
-              ? '${_dateRappel!.day.toString().padLeft(2, '0')}/'
-                  '${_dateRappel!.month.toString().padLeft(2, '0')}/'
-                  '${_dateRappel!.year}'
-              : null,
+          nomAnimal: nomAnimal,
+          nomVaccin: nomVaccin,
+          dateRappelFormatee: dateRappelFormatee,
+        );
+
+        // 2b. Push FCM sur le téléphone
+        await _envoyerPushFCM(
+          eleveurId: eleveurId,
+          nomAnimal: nomAnimal,
+          nomVaccin: nomVaccin,
+          dateRappelFormatee: dateRappelFormatee,
         );
       }
 
@@ -187,7 +233,7 @@ class _NouvelleVaccinationPageState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-                '✅ Vaccination enregistrée — l\'éleveur a été notifié'),
+                'Vaccination enregistrée — éleveur notifié (in-app + push)'),
             backgroundColor: Colors.blue,
             duration: Duration(seconds: 3),
           ),
@@ -195,11 +241,11 @@ class _NouvelleVaccinationPageState
         Navigator.pop(context, true);
       }
     } catch (e) {
-      debugPrint('❌ Erreur enregistrement vaccination: $e');
+      debugPrint('Erreur enregistrement vaccination: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ Erreur: ${e.toString()}'),
+            content: Text('Erreur: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -237,15 +283,12 @@ class _NouvelleVaccinationPageState
                   children: [
                     _buildAnimalInfo(),
                     const SizedBox(height: 16),
-
-                    // ✅ Bandeau notification
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: Colors.blue[50],
                         borderRadius: BorderRadius.circular(8),
-                        border:
-                            Border.all(color: Colors.blue.shade200),
+                        border: Border.all(color: Colors.blue.shade200),
                       ),
                       child: Row(
                         children: [
@@ -254,7 +297,7 @@ class _NouvelleVaccinationPageState
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'L\'éleveur sera automatiquement notifié après l\'enregistrement',
+                              'L\'éleveur recevra une notification in-app ET un push sur son téléphone',
                               style: TextStyle(
                                   fontSize: 12,
                                   color: Colors.blue[900]),
@@ -264,16 +307,14 @@ class _NouvelleVaccinationPageState
                       ),
                     ),
                     const SizedBox(height: 24),
-
                     const Text('Informations de vaccination',
                         style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold)),
                     const SizedBox(height: 16),
-
                     const Text('Vaccins fréquents',
-                        style:
-                            TextStyle(fontSize: 13, color: Colors.grey)),
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.grey)),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -287,10 +328,9 @@ class _NouvelleVaccinationPageState
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 10, vertical: 6),
                                   decoration: BoxDecoration(
-                                    color:
-                                        _vaccController.text == vaccin
-                                            ? Colors.blue[700]
-                                            : Colors.blue[50],
+                                    color: _vaccController.text == vaccin
+                                        ? Colors.blue[700]
+                                        : Colors.blue[50],
                                     borderRadius:
                                         BorderRadius.circular(20),
                                     border: Border.all(
@@ -300,10 +340,10 @@ class _NouvelleVaccinationPageState
                                     vaccin,
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color:
-                                          _vaccController.text == vaccin
-                                              ? Colors.white
-                                              : Colors.blue[800],
+                                      color: _vaccController.text ==
+                                              vaccin
+                                          ? Colors.white
+                                          : Colors.blue[800],
                                     ),
                                   ),
                                 ),
@@ -311,7 +351,6 @@ class _NouvelleVaccinationPageState
                           .toList(),
                     ),
                     const SizedBox(height: 16),
-
                     TextFormField(
                       controller: _vaccController,
                       decoration: const InputDecoration(
@@ -327,30 +366,33 @@ class _NouvelleVaccinationPageState
                               : null,
                     ),
                     const SizedBox(height: 16),
-
                     Row(
                       children: [
                         Expanded(
-                            child: _buildDateCard(
-                                'Date vaccination',
-                                _dateVaccination,
-                                Icons.calendar_today,
-                                Colors.blue, (date) {
-                          setState(() => _dateVaccination = date);
-                        })),
+                          child: _buildDateCard(
+                            'Date vaccination',
+                            _dateVaccination,
+                            Icons.calendar_today,
+                            Colors.blue,
+                            (date) =>
+                                setState(() => _dateVaccination = date),
+                          ),
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
-                            child: _buildDateCard(
-                                'Date rappel',
-                                _dateRappel,
-                                Icons.event_repeat,
-                                Colors.orange, (date) {
-                          setState(() => _dateRappel = date);
-                        }, nullable: true)),
+                          child: _buildDateCard(
+                            'Date rappel',
+                            _dateRappel,
+                            Icons.event_repeat,
+                            Colors.orange,
+                            (date) =>
+                                setState(() => _dateRappel = date),
+                            nullable: true,
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 16),
-
                     TextFormField(
                       controller: _lotController,
                       decoration: const InputDecoration(
@@ -362,7 +404,6 @@ class _NouvelleVaccinationPageState
                       ),
                     ),
                     const SizedBox(height: 16),
-
                     TextFormField(
                       controller: _obsController,
                       decoration: const InputDecoration(
@@ -375,7 +416,6 @@ class _NouvelleVaccinationPageState
                       maxLines: 3,
                     ),
                     const SizedBox(height: 32),
-
                     SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -421,11 +461,7 @@ class _NouvelleVaccinationPageState
         leading: Icon(icon, color: color),
         title: Text(label, style: const TextStyle(fontSize: 11)),
         subtitle: Text(
-          date != null
-              ? '${date.day.toString().padLeft(2, '0')}/'
-                  '${date.month.toString().padLeft(2, '0')}/'
-                  '${date.year}'
-              : 'Non définie',
+          date != null ? _formaterDate(date) : 'Non définie',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             color: date != null ? null : Colors.grey,
@@ -477,18 +513,18 @@ class _NouvelleVaccinationPageState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.animal['nom'] ?? 'Sans nom',
+                  widget.animal['nom']?.toString() ?? 'Sans nom',
                   style: const TextStyle(
                       fontSize: 18, fontWeight: FontWeight.bold),
                 ),
-                Text('Race: ${widget.animal['race'] ?? 'N/A'}',
+                Text(
+                    'Race: ${widget.animal['race']?.toString() ?? 'N/A'}',
                     style: TextStyle(
                         fontSize: 14, color: Colors.grey[700])),
-                Text('Tag: ${widget.animal['tag_rfid'] ?? 'N/A'}',
+                Text(
+                    'Tag: ${widget.animal['tag_rfid']?.toString() ?? 'N/A'}',
                     style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                        fontFamily: 'monospace')),
+                        fontSize: 12, color: Colors.grey[600])),
               ],
             ),
           ),

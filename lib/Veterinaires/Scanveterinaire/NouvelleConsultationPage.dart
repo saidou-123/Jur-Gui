@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ============================================================
 // NOUVELLE CONSULTATION
-// ✅ ÉTAPE 3 : Notification automatique à l'éleveur après enregistrement
+// ✅ Notification in-app + Push FCM après enregistrement
 // ============================================================
 class NouvelleConsultationPage extends StatefulWidget {
   final Map<String, dynamic> animal;
@@ -51,10 +51,7 @@ class _NouvelleConsultationPageState
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────
-  // ✅ NOUVEAU : Récupérer l'ID de l'éleveur propriétaire
-  // pour lui envoyer la notification
-  // ─────────────────────────────────────────────────────────
+  // ─── Récupérer l'ID de l'éleveur propriétaire ───────────
   Future<String?> _getEleveurId() async {
     try {
       final table =
@@ -66,23 +63,19 @@ class _NouvelleConsultationPageState
           .maybeSingle();
       return result?['user_id']?.toString();
     } catch (e) {
-      debugPrint('❌ Erreur récupération éleveur: $e');
+      debugPrint('Erreur récupération éleveur: $e');
       return null;
     }
   }
 
-  // ─────────────────────────────────────────────────────────
-  // ✅ NOUVEAU : Envoyer une notification à l'éleveur
-  // Insère dans la table notifications (créée en étape 3)
-  // ─────────────────────────────────────────────────────────
-  Future<void> _notifierEleveur({
+  // ─── Notification in-app (table notifications) ───────────
+  Future<void> _notifierEleveurInApp({
     required String eleveurId,
     required String veterinaireId,
     required String nomAnimal,
     required String motif,
   }) async {
     try {
-      // Récupérer le nom du vétérinaire
       final vetData = await supabase
           .from('users')
           .select('nom_complet, prenom, nom')
@@ -101,7 +94,7 @@ class _NouvelleConsultationPageState
         'destinataire_id': eleveurId,
         'expediteur_id': veterinaireId,
         'type': 'nouvelle_consultation',
-        'titre': '🩺 Consultation enregistrée pour $nomAnimal',
+        'titre': 'Consultation enregistrée pour $nomAnimal',
         'corps':
             '$nomVet a effectué une consultation.\nMotif : $motif\nConsultez l\'historique médical pour les détails.',
         'animal_id': widget.animal['id'].toString(),
@@ -109,11 +102,40 @@ class _NouvelleConsultationPageState
         'lu': false,
         'created_at': DateTime.now().toIso8601String(),
       });
-
-      debugPrint('✅ Notification envoyée à l\'éleveur $eleveurId');
+      debugPrint('Notification in-app envoyée à $eleveurId');
     } catch (e) {
-      // La notification échoue silencieusement : ne pas bloquer l'enregistrement
-      debugPrint('⚠️ Notification non envoyée: $e');
+      debugPrint('Notification in-app non envoyée: $e');
+    }
+  }
+
+  // ─── Push FCM (Edge Function Supabase) ───────────────────
+  Future<void> _envoyerPushFCM({
+    required String eleveurId,
+    required String nomAnimal,
+    required String motif,
+  }) async {
+    try {
+      final titre = 'Consultation — $nomAnimal';
+      final corps =
+          'Consultation enregistrée.\nMotif : $motif\nOuvrez l\'app pour les détails.';
+
+      await supabase.functions.invoke(
+        'send-push-notification',
+        body: {
+          'user_id': eleveurId,
+          'title': titre,
+          'body': corps,
+          'type': 'nouvelle_consultation',
+          'channel': 'alerte_channel',
+          'data': {
+            'animal_id': widget.animal['id'].toString(),
+            'source': widget.source,
+          },
+        },
+      );
+      debugPrint('Push FCM consultation envoyé à $eleveurId');
+    } catch (e) {
+      debugPrint('Push FCM non envoyé (silencieux): $e');
     }
   }
 
@@ -128,7 +150,7 @@ class _NouvelleConsultationPageState
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content:
-                  Text('❌ Session expirée. Veuillez vous reconnecter.'),
+                  Text('Session expirée. Veuillez vous reconnecter.'),
               backgroundColor: Colors.red,
             ),
           );
@@ -175,14 +197,26 @@ class _NouvelleConsultationPageState
       // 1. Enregistrer la consultation
       await supabase.from('consultations').insert(data);
 
-      // 2. ✅ NOUVEAU : Notifier l'éleveur en arrière-plan
+      // 2. Récupérer l'ID de l'éleveur
       final eleveurId = await _getEleveurId();
       if (eleveurId != null) {
-        await _notifierEleveur(
+        final nomAnimal =
+            widget.animal['nom']?.toString() ?? 'votre animal';
+        final motif = _motifController.text.trim();
+
+        // 2a. Notification in-app
+        await _notifierEleveurInApp(
           eleveurId: eleveurId,
           veterinaireId: veterinaire.id,
-          nomAnimal: widget.animal['nom'] ?? 'votre animal',
-          motif: _motifController.text.trim(),
+          nomAnimal: nomAnimal,
+          motif: motif,
+        );
+
+        // 2b. Push FCM sur le téléphone
+        await _envoyerPushFCM(
+          eleveurId: eleveurId,
+          nomAnimal: nomAnimal,
+          motif: motif,
         );
       }
 
@@ -190,7 +224,7 @@ class _NouvelleConsultationPageState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-                '✅ Consultation enregistrée — l\'éleveur a été notifié'),
+                'Consultation enregistrée — éleveur notifié (in-app + push)'),
             backgroundColor: Colors.green,
             duration: Duration(seconds: 3),
           ),
@@ -198,11 +232,11 @@ class _NouvelleConsultationPageState
         Navigator.pop(context, true);
       }
     } catch (e) {
-      debugPrint('❌ Erreur enregistrement: $e');
+      debugPrint('Erreur enregistrement: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ Erreur: ${e.toString()}'),
+            content: Text('Erreur: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -240,8 +274,6 @@ class _NouvelleConsultationPageState
                   children: [
                     _buildAnimalInfo(),
                     const SizedBox(height: 16),
-
-                    // ✅ Bandeau info notification
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
@@ -256,7 +288,7 @@ class _NouvelleConsultationPageState
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'L\'éleveur sera automatiquement notifié après l\'enregistrement',
+                              'L\'éleveur recevra une notification in-app ET un push sur son téléphone',
                               style: TextStyle(
                                   fontSize: 12, color: Colors.green[900]),
                             ),
@@ -265,12 +297,10 @@ class _NouvelleConsultationPageState
                       ),
                     ),
                     const SizedBox(height: 24),
-
                     const Text('Informations de consultation',
                         style: TextStyle(
                             fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 16),
-
                     Row(
                       children: [
                         Expanded(child: _buildDatePicker()),
@@ -279,48 +309,34 @@ class _NouvelleConsultationPageState
                       ],
                     ),
                     const SizedBox(height: 16),
-
-                    _buildTextField(
-                        _motifController,
+                    _buildTextField(_motifController,
                         'Motif de consultation *',
                         'Ex: Contrôle de routine, boiterie...',
                         Icons.comment,
-                        maxLines: 2,
-                        required: true),
+                        maxLines: 2, required: true),
                     const SizedBox(height: 16),
-
-                    _buildTextField(
-                        _examenController,
+                    _buildTextField(_examenController,
                         'Examen clinique *',
-                        'Température, fréquence cardiaque, état général...',
+                        'Température, fréquence cardiaque...',
                         Icons.monitor_heart,
-                        maxLines: 4,
-                        required: true),
+                        maxLines: 4, required: true),
                     const SizedBox(height: 16),
-
-                    _buildTextField(
-                        _diagnosticController,
+                    _buildTextField(_diagnosticController,
                         'Diagnostic *',
                         'Diagnostic posé suite à l\'examen',
                         Icons.assignment,
-                        maxLines: 3,
-                        required: true),
+                        maxLines: 3, required: true),
                     const SizedBox(height: 16),
-
-                    _buildTextField(
-                        _traitementController,
+                    _buildTextField(_traitementController,
                         'Traitement prescrit *',
                         'Médicaments, posologie, durée...',
                         Icons.medication,
-                        maxLines: 4,
-                        required: true),
+                        maxLines: 4, required: true),
                     const SizedBox(height: 16),
-
                     const Text('Paramètres vitaux (optionnel)',
                         style: TextStyle(
                             fontSize: 15, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
-
                     Row(
                       children: [
                         Expanded(
@@ -351,7 +367,6 @@ class _NouvelleConsultationPageState
                       ],
                     ),
                     const SizedBox(height: 12),
-
                     TextFormField(
                       controller: _fcController,
                       keyboardType: TextInputType.number,
@@ -363,21 +378,19 @@ class _NouvelleConsultationPageState
                       ),
                     ),
                     const SizedBox(height: 16),
-
-                    _buildTextField(
-                        _observationsController,
+                    _buildTextField(_observationsController,
                         'Observations additionnelles',
                         'Remarques, recommandations...',
                         Icons.notes,
                         maxLines: 3),
                     const SizedBox(height: 32),
-
                     SizedBox(
                       width: double.infinity,
                       height: 50,
                       child: ElevatedButton.icon(
-                        onPressed:
-                            _isLoading ? null : _enregistrerConsultation,
+                        onPressed: _isLoading
+                            ? null
+                            : _enregistrerConsultation,
                         icon: const Icon(Icons.check_circle),
                         label: const Text(
                             'Enregistrer & Notifier l\'éleveur',
@@ -390,13 +403,11 @@ class _NouvelleConsultationPageState
                     ),
                     const SizedBox(height: 12),
                     Center(
-                      child: Text(
-                        '* Champs obligatoires',
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                            fontStyle: FontStyle.italic),
-                      ),
+                      child: Text('* Champs obligatoires',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                              fontStyle: FontStyle.italic)),
                     ),
                   ],
                 ),
@@ -439,53 +450,37 @@ class _NouvelleConsultationPageState
       ),
       child: Row(
         children: [
-          widget.animal['image_url'] != null
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.network(
-                    widget.animal['image_url'],
-                    width: 60,
-                    height: 60,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      width: 60,
-                      height: 60,
-                      color: Colors.grey[300],
-                      child: const Icon(Icons.pets, size: 30),
-                    ),
-                  ),
-                )
-              : Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
-                    color: Colors.green[100],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.pets,
-                      size: 30, color: Colors.green),
-                ),
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: Colors.green[100],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.pets, size: 30, color: Colors.green),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.animal['nom'] ?? 'Sans nom',
+                  widget.animal['nom']?.toString() ?? 'Sans nom',
                   style: const TextStyle(
                       fontSize: 18, fontWeight: FontWeight.bold),
                 ),
-                Text('Race: ${widget.animal['race'] ?? 'N/A'}',
-                    style:
-                        TextStyle(fontSize: 14, color: Colors.grey[700])),
-                Text('Sexe: ${widget.animal['sexe'] ?? 'N/A'}',
-                    style:
-                        TextStyle(fontSize: 14, color: Colors.grey[700])),
-                Text('Tag: ${widget.animal['tag_rfid'] ?? 'N/A'}',
+                Text(
+                    'Race: ${widget.animal['race']?.toString() ?? 'N/A'}',
                     style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                        fontFamily: 'monospace')),
+                        fontSize: 14, color: Colors.grey[700])),
+                Text(
+                    'Sexe: ${widget.animal['sexe']?.toString() ?? 'N/A'}',
+                    style: TextStyle(
+                        fontSize: 14, color: Colors.grey[700])),
+                Text(
+                    'Tag: ${widget.animal['tag_rfid']?.toString() ?? 'N/A'}',
+                    style: TextStyle(
+                        fontSize: 12, color: Colors.grey[600])),
               ],
             ),
           ),
@@ -497,7 +492,8 @@ class _NouvelleConsultationPageState
   Widget _buildDatePicker() {
     return Card(
       child: ListTile(
-        leading: const Icon(Icons.calendar_today, color: Colors.green),
+        leading:
+            const Icon(Icons.calendar_today, color: Colors.green),
         title: const Text('Date', style: TextStyle(fontSize: 12)),
         subtitle: Text(
           '${_dateConsultation.day.toString().padLeft(2, '0')}/'
