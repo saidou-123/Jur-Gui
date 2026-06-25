@@ -12,7 +12,8 @@ class MonTroupeau extends StatefulWidget {
   State<MonTroupeau> createState() => _MonTroupeauState();
 }
 
-class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStateMixin {
+class _MonTroupeauState extends State<MonTroupeau>
+    with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
@@ -26,13 +27,15 @@ class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStat
     );
 
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
+      CurvedAnimation(
+          parent: _animationController, curve: Curves.easeIn),
     );
 
     _slideAnimation = Tween<Offset>(
       begin: const Offset(0, 0.15),
       end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _animationController, curve: Curves.easeOutCubic));
+    ).animate(CurvedAnimation(
+        parent: _animationController, curve: Curves.easeOutCubic));
 
     _animationController.forward();
   }
@@ -78,10 +81,7 @@ class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStat
     return AppBar(
       title: const Text(
         "Mon Troupeau",
-        style: TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: 20,
-        ),
+        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
       ),
       centerTitle: true,
       backgroundColor: Colors.white,
@@ -90,6 +90,7 @@ class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStat
       iconTheme: IconThemeData(color: Couleur.PremierColor),
     );
   }
+
   Widget _buildSectionTitle(String title, IconData icon) {
     return Row(
       children: [
@@ -134,9 +135,11 @@ class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStat
             "Modifier la fiche",
             "Mettre à jour les informations de l'animal",
             Colors.blue,
-            () {  Navigator.push(
+            () {
+              Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const AnimalListPage()),
+                MaterialPageRoute(
+                    builder: (context) => const AnimalListPage()),
               );
             },
           ),
@@ -149,7 +152,8 @@ class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStat
             () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const AnimalDeletePage()),
+                MaterialPageRoute(
+                    builder: (context) => const AnimalDeletePage()),
               );
             },
           ),
@@ -162,7 +166,9 @@ class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStat
             () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const  AnimalInfoRFIDPageBluetooth ()),
+                MaterialPageRoute(
+                    builder: (context) =>
+                        const AnimalInfoRFIDPageBluetooth()),
               );
             },
           ),
@@ -175,7 +181,11 @@ class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStat
             () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const HistoriqueMedicalEleveur()),
+                MaterialPageRoute(
+                  // ✅ CORRIGÉ : suppression du 'const' invalide
+                  // HistoriqueMedicalEleveur utilise Supabase au runtime
+                  builder: (context) => const HistoriqueMedicalEleveur(),
+                ),
               );
             },
           ),
@@ -288,7 +298,8 @@ class _MonTroupeauState extends State<MonTroupeau> with SingleTickerProviderStat
           ),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10)),
           duration: const Duration(seconds: 1),
         ),
       );

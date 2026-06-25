@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+// ✅ ÉTAPE 3 : Notification locale vétérinaire
+import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
 
 // ============================================================
 // NOUVELLE VACCINATION
@@ -220,7 +222,7 @@ class _NouvelleVaccinationPageState
           dateRappelFormatee: dateRappelFormatee,
         );
 
-        // 2b. Push FCM sur le téléphone
+        // 2b. Push FCM sur le téléphone (éleveur)
         await _envoyerPushFCM(
           eleveurId: eleveurId,
           nomAnimal: nomAnimal,
@@ -229,15 +231,21 @@ class _NouvelleVaccinationPageState
         );
       }
 
+      // 3. ✅ Notification locale au vétérinaire (confirmation)
+      final rappelTxt = _dateRappel != null
+          ? ' — Rappel le ${_formaterDate(_dateRappel!)}'
+          : '';
+      await NotificationService().afficherNotificationImmediateLocal(
+        titre  : 'Vaccination enregistrée',
+        corps  : '${_vaccController.text.trim()} — '
+                 '${widget.animal['nom']?.toString() ?? 'Animal'}'
+                 '$rappelTxt'
+                 "\nL'éleveur a été notifié.",
+        type   : 'consultation_validee',
+        urgente: false,
+      );
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                'Vaccination enregistrée — éleveur notifié (in-app + push)'),
-            backgroundColor: Colors.blue,
-            duration: Duration(seconds: 3),
-          ),
-        );
         Navigator.pop(context, true);
       }
     } catch (e) {

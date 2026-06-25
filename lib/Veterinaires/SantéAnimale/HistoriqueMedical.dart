@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+// ✅ ÉTAPE 4 : Import des constantes partagées
+import 'package:depart/constants.dart';
 
 // ============================================================
-// HISTORIQUE MÉDICAL VÉTÉRINAIRE — filtrage sécurisé
-// Correction : chaque vétérinaire ne voit QUE ses propres actes
+// HISTORIQUE MÉDICAL VÉTÉRINAIRE
+// ✅ ÉTAPE 1 : Filtrage sécurisé par veterinaire_id
+// ✅ ÉTAPE 2 : Vue SQL (zéro requête N+1)
+// ✅ ÉTAPE 4 : Constantes partagées (FiltreHistorique, Tables)
 // ============================================================
 class HistoriqueMedical extends StatefulWidget {
   const HistoriqueMedical({super.key});
@@ -16,9 +20,9 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
   final supabase = Supabase.instance.client;
   List<Map<String, dynamic>> _historique = [];
   bool _isLoading = true;
-  String _filtre = 'tout';
 
-  // ✅ SÉCURITÉ : ID du vétérinaire connecté, récupéré une seule fois
+  // ✅ Utilise FiltreHistorique.tout au lieu de 'tout' en dur
+  String _filtre = FiltreHistorique.tout;
   String? _veterinaireId;
 
   @override
@@ -31,12 +35,11 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
   Future<void> _chargerHistorique() async {
     if (!mounted) return;
 
-    // ✅ SÉCURITÉ : vérifier que le vétérinaire est bien connecté
     if (_veterinaireId == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('❌ Session expirée. Veuillez vous reconnecter.'),
+            content: Text('Session expirée. Veuillez vous reconnecter.'),
             backgroundColor: Colors.red,
           ),
         );
@@ -48,79 +51,26 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
     setState(() => _isLoading = true);
 
     try {
-      List<Map<String, dynamic>> historique = [];
-
-      // ✅ SÉCURITÉ CORRIGÉE : filtre strict par veterinaire_id
-      // Avant : .select('*') sans filtre → exposait TOUS les dossiers
-      // Après : .eq('veterinaire_id', _veterinaireId!) → seulement ses actes
-      final consultations = await supabase
-          .from('consultations')
-          .select('*')
+      // ✅ Tables.historiqueComplet au lieu de 'historique_medical_complet'
+      final data = await supabase
+          .from(Tables.historiqueComplet)
+          .select()
           .eq('veterinaire_id', _veterinaireId!)
-          .order('date_consultation', ascending: false);
-
-      for (var c in consultations) {
-        final nomAnimal =
-            await _getNomAnimal(c['animal_id']?.toString(), c['source']);
-        historique.add({
-          'type': 'consultation',
-          'date': c['date_consultation']?.toString() ?? '',
-          'animal_nom': nomAnimal,
-          'animal_id': c['animal_id'],
-          'source': c['source'],
-          'titre': 'Consultation — ${c['motif'] ?? 'N/A'}',
-          'description': c['diagnostic'] ?? c['examen_clinique'] ?? 'N/A',
-          'details': c,
-        });
-      }
-
-      // ✅ SÉCURITÉ CORRIGÉE : filtre strict par veterinaire_id
-      final vaccinations = await supabase
-          .from('vaccinations')
-          .select('*')
-          .eq('veterinaire_id', _veterinaireId!)
-          .order('date_vaccination', ascending: false);
-
-      for (var v in vaccinations) {
-        final nomAnimal =
-            await _getNomAnimal(v['animal_id']?.toString(), v['source']);
-        historique.add({
-          'type': 'vaccination',
-          'date': v['date_vaccination']?.toString() ?? '',
-          'animal_nom': nomAnimal,
-          'animal_id': v['animal_id'],
-          'source': v['source'],
-          'titre': 'Vaccination — ${v['nom_vaccin'] ?? 'N/A'}',
-          'description': v['observations'] ?? 'Aucune observation',
-          'date_rappel': v['date_rappel'],
-          'details': v,
-        });
-      }
-
-      // Trier par date décroissante
-      historique.sort((a, b) {
-        try {
-          final da = DateTime.parse(a['date']);
-          final db = DateTime.parse(b['date']);
-          return db.compareTo(da);
-        } catch (_) {
-          return 0;
-        }
-      });
+          .order('date_acte', ascending: false);
 
       if (mounted) {
         setState(() {
-          _historique = historique;
+          _historique = List<Map<String, dynamic>>.from(data);
           _isLoading = false;
         });
       }
     } catch (e) {
-      debugPrint('❌ Erreur chargement historique: $e');
+      debugPrint('Erreur chargement historique vét: $e');
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ Erreur: ${e.toString()}'),
+            content: Text('Erreur: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -128,24 +78,23 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
     }
   }
 
-  Future<String> _getNomAnimal(String? animalId, String? source) async {
-    if (animalId == null || source == null) return 'Animal inconnu';
-    try {
-      final table = source == 'nee' ? 'nouveaux_nee' : 'animal_acheter';
-      final result = await supabase
-          .from(table)
-          .select('nom')
-          .eq('id', animalId)
-          .maybeSingle();
-      return result?['nom']?.toString() ?? 'Animal inconnu';
-    } catch (_) {
-      return 'Animal inconnu';
-    }
+  List<Map<String, dynamic>> get _historiqueFiltre {
+    // ✅ Compare avec FiltreHistorique.tout au lieu de 'tout'
+    if (_filtre == FiltreHistorique.tout) return _historique;
+    return _historique
+        .where((item) => item['type_acte'] == _filtre)
+        .toList();
   }
 
-  List<Map<String, dynamic>> get _historiqueFiltre {
-    if (_filtre == 'tout') return _historique;
-    return _historique.where((item) => item['type'] == _filtre).toList();
+  String _formatDate(String? iso) {
+    if (iso == null || iso.isEmpty) return 'Date inconnue';
+    try {
+      final dt = DateTime.parse(iso);
+      return '${dt.day.toString().padLeft(2, '0')}/'
+          '${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+    } catch (_) {
+      return iso;
+    }
   }
 
   @override
@@ -154,15 +103,16 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
       appBar: AppBar(
         title: const Text('Historique Médical'),
         backgroundColor: Colors.orange[700],
+        foregroundColor: Colors.white,
         actions: [
-          // ✅ Affiche le nombre total d'actes dans le titre
           if (!_isLoading)
             Center(
               child: Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: Text(
                   '${_historique.length} acte(s)',
-                  style: const TextStyle(fontSize: 13, color: Colors.white70),
+                  style: const TextStyle(
+                      fontSize: 13, color: Colors.white70),
                 ),
               ),
             ),
@@ -174,23 +124,23 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
       ),
       body: Column(
         children: [
-          // ✅ Bannière de sécurité : confirme le contexte filtré
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             color: Colors.orange[50],
             child: Row(
               children: [
-                Icon(Icons.verified_user, color: Colors.orange[700], size: 16),
+                Icon(Icons.verified_user,
+                    color: Colors.orange[700], size: 16),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '🔒 Affichage limité à vos actes médicaux uniquement',
+                    'Affichage limité à vos actes médicaux — chargement optimisé',
                     style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.orange[900],
-                      fontWeight: FontWeight.w500,
-                    ),
+                        fontSize: 12,
+                        color: Colors.orange[900],
+                        fontWeight: FontWeight.w500),
                   ),
                 ),
               ],
@@ -208,8 +158,7 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
                           padding: const EdgeInsets.all(16),
                           itemCount: _historiqueFiltre.length,
                           itemBuilder: (context, index) =>
-                              _buildHistoriqueItem(
-                                  _historiqueFiltre[index], index),
+                              _buildItem(_historiqueFiltre[index], index),
                         ),
                       ),
           ),
@@ -219,25 +168,21 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
   }
 
   Widget _buildFilterChips() {
-    final filtres = [
-      {'label': 'Tout', 'value': 'tout'},
-      {'label': 'Consultations', 'value': 'consultation'},
-      {'label': 'Vaccinations', 'value': 'vaccination'},
-    ];
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          children: filtres.map((f) {
+          // ✅ FiltreHistorique.filtres au lieu de la liste définie en dur
+          children: FiltreHistorique.filtres.map((f) {
             final isSelected = _filtre == f['value'];
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: FilterChip(
                 label: Text(f['label']!),
                 selected: isSelected,
-                onSelected: (_) => setState(() => _filtre = f['value']!),
+                onSelected: (_) =>
+                    setState(() => _filtre = f['value']!),
                 selectedColor: Colors.orange[200],
                 checkmarkColor: Colors.orange[900],
               ),
@@ -248,30 +193,22 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
     );
   }
 
-  Widget _buildHistoriqueItem(Map<String, dynamic> item, int index) {
-    Color couleur;
-    IconData icone;
-
-    switch (item['type']) {
-      case 'consultation':
-        couleur = Colors.green;
-        icone = Icons.medical_services;
-        break;
-      case 'vaccination':
-        couleur = Colors.blue;
-        icone = Icons.vaccines;
-        break;
-      default:
-        couleur = Colors.grey;
-        icone = Icons.help_outline;
-    }
-
+  Widget _buildItem(Map<String, dynamic> item, int index) {
+    // ✅ TypeActe.consultation au lieu de 'consultation'
+    final isConsultation =
+        item['type_acte'] == TypeActe.consultation;
+    final couleur = isConsultation ? Colors.green : Colors.blue;
+    final icone =
+        isConsultation ? Icons.medical_services : Icons.vaccines;
     final isLast = index == _historiqueFiltre.length - 1;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
-        onTap: () => _showDetailDialog(item),
+        onTap: () => _showDetail(item),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -305,11 +242,9 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          _formatDate(item['date']),
+                          _formatDate(item['date_acte']?.toString()),
                           style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                              fontWeight: FontWeight.w500),
+                              fontSize: 12, color: Colors.grey[600]),
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -319,7 +254,12 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
-                            item['type'].toString().toUpperCase(),
+                            // ✅ FiltreHistorique.labelConsultation
+                            isConsultation
+                                ? FiltreHistorique.labelConsultation
+                                    .toUpperCase()
+                                : FiltreHistorique.labelVaccination
+                                    .toUpperCase(),
                             style: TextStyle(
                                 fontSize: 10,
                                 color: couleur,
@@ -330,19 +270,22 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      item['titre'],
+                      item['titre'] ?? 'Sans titre',
                       style: const TextStyle(
                           fontSize: 15, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 4),
-                    Text('🐑 ${item['animal_nom']}',
-                        style: TextStyle(
-                            fontSize: 14, color: Colors.grey[700])),
+                    Text(
+                      '🐑 ${item['animal_nom'] ?? 'Inconnu'}'
+                      '${item['animal_race'] != null && item['animal_race'].toString().isNotEmpty ? ' (${item['animal_race']})' : ''}',
+                      style: TextStyle(
+                          fontSize: 14, color: Colors.grey[700]),
+                    ),
                     const SizedBox(height: 4),
                     Text(
-                      item['description'],
-                      style:
-                          TextStyle(fontSize: 13, color: Colors.grey[600]),
+                      item['description'] ?? '',
+                      style: TextStyle(
+                          fontSize: 13, color: Colors.grey[600]),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -350,7 +293,7 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                          '🔔 Rappel: ${_formatDate(item['date_rappel'].toString())}',
+                          'Rappel: ${_formatDate(item['date_rappel']?.toString())}',
                           style: const TextStyle(
                               fontSize: 12,
                               color: Colors.orange,
@@ -374,13 +317,11 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
         children: [
           Icon(Icons.history, size: 80, color: Colors.grey[400]),
           const SizedBox(height: 16),
-          Text(
-            'Aucun historique trouvé',
-            style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-          ),
+          Text('Aucun historique trouvé',
+              style: TextStyle(fontSize: 18, color: Colors.grey[600])),
           const SizedBox(height: 8),
           Text(
-            _filtre != 'tout'
+            _filtre != FiltreHistorique.tout
                 ? 'Essayez un autre filtre'
                 : 'Vos actes médicaux apparaîtront ici',
             style: TextStyle(fontSize: 14, color: Colors.grey[500]),
@@ -390,24 +331,12 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
     );
   }
 
-  void _showDetailDialog(Map<String, dynamic> item) {
-    Color couleur;
-    IconData icone;
-    switch (item['type']) {
-      case 'consultation':
-        couleur = Colors.green;
-        icone = Icons.medical_services;
-        break;
-      case 'vaccination':
-        couleur = Colors.blue;
-        icone = Icons.vaccines;
-        break;
-      default:
-        couleur = Colors.grey;
-        icone = Icons.help_outline;
-    }
-
-    final details = item['details'] as Map<String, dynamic>? ?? {};
+  void _showDetail(Map<String, dynamic> item) {
+    final isConsultation =
+        item['type_acte'] == TypeActe.consultation;
+    final couleur = isConsultation ? Colors.green : Colors.blue;
+    final icone =
+        isConsultation ? Icons.medical_services : Icons.vaccines;
 
     showDialog(
       context: context,
@@ -417,8 +346,8 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
             Icon(icone, color: couleur),
             const SizedBox(width: 8),
             Expanded(
-              child:
-                  Text(item['titre'], style: const TextStyle(fontSize: 16)),
+              child: Text(item['titre'] ?? 'Détail',
+                  style: const TextStyle(fontSize: 16)),
             ),
           ],
         ),
@@ -427,49 +356,48 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildDetailRow(
-                  'Date', _formatDate(item['date']), Icons.calendar_today),
-              _buildDetailRow('Animal', item['animal_nom'], Icons.pets),
-              _buildDetailRow('Type', item['type'], icone),
-              if (item['type'] == 'consultation') ...[
-                if (details['motif'] != null)
-                  _buildDetailRow(
-                      'Motif', details['motif'], Icons.comment),
-                if (details['diagnostic'] != null)
-                  _buildDetailRow('Diagnostic', details['diagnostic'],
+              _detailRow('Date',
+                  _formatDate(item['date_acte']?.toString()),
+                  Icons.calendar_today),
+              _detailRow(
+                  'Animal',
+                  '${item['animal_nom'] ?? 'Inconnu'}'
+                      '${item['animal_race'] != null && item['animal_race'].toString().isNotEmpty ? ' (${item['animal_race']})' : ''}',
+                  Icons.pets),
+              if (isConsultation) ...[
+                if (item['diagnostic'] != null)
+                  _detailRow('Diagnostic', item['diagnostic'],
                       Icons.assignment),
-                if (details['traitement'] != null)
-                  _buildDetailRow('Traitement', details['traitement'],
+                if (item['traitement'] != null)
+                  _detailRow('Traitement', item['traitement'],
                       Icons.medication),
-                if (details['temperature_c'] != null)
-                  _buildDetailRow('Température',
-                      '${details['temperature_c']} °C', Icons.thermostat),
-                if (details['poids_kg'] != null)
-                  _buildDetailRow(
-                      'Poids', '${details['poids_kg']} kg', Icons.monitor_weight),
-                if (details['frequence_cardiaque'] != null)
-                  _buildDetailRow('Fréq. cardiaque',
-                      '${details['frequence_cardiaque']} bpm', Icons.favorite),
-              ],
-              if (item['type'] == 'vaccination') ...[
-                if (details['nom_vaccin'] != null)
-                  _buildDetailRow(
-                      'Vaccin', details['nom_vaccin'], Icons.vaccines),
+                if (item['temperature_c'] != null)
+                  _detailRow('Température',
+                      '${item['temperature_c']} °C',
+                      Icons.thermostat),
+                if (item['poids_kg'] != null)
+                  _detailRow('Poids', '${item['poids_kg']} kg',
+                      Icons.monitor_weight),
+              ] else ...[
+                if (item['nom_vaccin'] != null)
+                  _detailRow(
+                      'Vaccin', item['nom_vaccin'], Icons.vaccines),
                 if (item['date_rappel'] != null)
-                  _buildDetailRow(
+                  _detailRow(
                       'Rappel prévu',
-                      _formatDate(item['date_rappel'].toString()),
+                      _formatDate(
+                          item['date_rappel']?.toString()),
                       Icons.event_repeat),
-                if (details['lot'] != null)
-                  _buildDetailRow('Lot', details['lot'], Icons.tag),
+                if (item['lot'] != null)
+                  _detailRow('Lot', item['lot'], Icons.tag),
               ],
-              if (details['observations'] != null &&
-                  details['observations'].toString().isNotEmpty) ...[
+              if (item['observations'] != null &&
+                  item['observations'].toString().isNotEmpty) ...[
                 const SizedBox(height: 8),
                 const Text('Observations :',
                     style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
-                Text(details['observations']),
+                Text(item['observations']),
               ],
             ],
           ),
@@ -484,13 +412,13 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
     );
   }
 
-  Widget _buildDetailRow(String label, String value, IconData icon) {
+  Widget _detailRow(String label, String value, IconData icon) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20, color: Colors.orange[700]),
+          Icon(icon, size: 18, color: Colors.orange[700]),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -498,28 +426,16 @@ class _HistoriqueMedicalState extends State<HistoriqueMedical> {
               children: [
                 Text(label,
                     style: TextStyle(
-                        fontSize: 12, color: Colors.grey[600])),
-                const SizedBox(height: 2),
+                        fontSize: 11, color: Colors.grey[600])),
                 Text(value,
                     style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w600)),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600)),
               ],
             ),
           ),
         ],
       ),
     );
-  }
-
-  String _formatDate(String isoDate) {
-    if (isoDate.isEmpty) return 'Date inconnue';
-    try {
-      final date = DateTime.parse(isoDate);
-      return '${date.day.toString().padLeft(2, '0')}/'
-          '${date.month.toString().padLeft(2, '0')}/'
-          '${date.year}';
-    } catch (_) {
-      return isoDate;
-    }
   }
 }

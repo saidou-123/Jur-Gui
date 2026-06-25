@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+// ✅ ÉTAPE 3 : Notification locale vétérinaire
+import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
 
 // ============================================================
 // NOUVELLE CONSULTATION
@@ -212,7 +214,7 @@ class _NouvelleConsultationPageState
           motif: motif,
         );
 
-        // 2b. Push FCM sur le téléphone
+        // 2b. Push FCM sur le téléphone (éleveur)
         await _envoyerPushFCM(
           eleveurId: eleveurId,
           nomAnimal: nomAnimal,
@@ -220,15 +222,17 @@ class _NouvelleConsultationPageState
         );
       }
 
+      // 3. ✅ Notification locale au vétérinaire (confirmation)
+      await NotificationService().afficherNotificationImmediateLocal(
+        titre  : 'Consultation enregistrée',
+        corps  : '${_motifController.text.trim()} — '
+                 '${widget.animal['nom']?.toString() ?? 'Animal'}'
+                 '\nL\'éleveur a été notifié.',
+        type   : 'consultation_validee',
+        urgente: false,
+      );
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                'Consultation enregistrée — éleveur notifié (in-app + push)'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
-          ),
-        );
         Navigator.pop(context, true);
       }
     } catch (e) {

@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+// ✅ ÉTAPE 4 : Import des constantes partagées
+import 'package:depart/constants.dart';
 
 // ============================================================
 // HISTORIQUE MÉDICAL ÉLEVEUR (LECTURE SEULE)
-// ✅ ÉTAPE 2 : Zéro requête N+1 — utilise la vue SQL
-//    historique_medical_complet (1 seule requête au lieu de N*2)
 // ✅ ÉTAPE 1 : Filtrage sécurisé par eleveur_id
+// ✅ ÉTAPE 2 : Vue SQL (zéro requête N+1)
+// ✅ ÉTAPE 4 : Constantes partagées — même FiltreHistorique
+//             que HistoriqueMedical.dart (vétérinaire)
 // ============================================================
 class HistoriqueMedicalEleveur extends StatefulWidget {
   const HistoriqueMedicalEleveur({super.key});
@@ -20,7 +23,10 @@ class _HistoriqueMedicalEleveurState
   final supabase = Supabase.instance.client;
   List<Map<String, dynamic>> _historique = [];
   bool _isLoading = true;
-  String _filtre = 'Tout';
+
+  // ✅ Même valeur que le vétérinaire : FiltreHistorique.tout = 'tout'
+  // Avant : éleveur avait 'Tout', vétérinaire avait 'tout' → incohérence
+  String _filtre = FiltreHistorique.tout;
   String? _eleveurId;
 
   @override
@@ -37,7 +43,7 @@ class _HistoriqueMedicalEleveurState
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('❌ Session expirée. Veuillez vous reconnecter.'),
+            content: Text('Session expirée. Veuillez vous reconnecter.'),
             backgroundColor: Colors.red,
           ),
         );
@@ -49,15 +55,11 @@ class _HistoriqueMedicalEleveurState
     setState(() => _isLoading = true);
 
     try {
-      // ✅ UNE SEULE REQUÊTE grâce à la vue SQL
-      // La vue contient eleveur_id calculé depuis nouveaux_nee.user_id
-      // ou animal_acheter.user_id selon la source de l'animal
-      // Avant : boucles avec N*2 requêtes supplémentaires
-      // Après : 1 requête filtrée = résultat instantané
+      // ✅ Tables.historiqueComplet au lieu de 'historique_medical_complet'
       final data = await supabase
-          .from('historique_medical_complet')
+          .from(Tables.historiqueComplet)
           .select()
-          .eq('eleveur_id', _eleveurId!) // ✅ sécurité : seulement ses animaux
+          .eq('eleveur_id', _eleveurId!)
           .order('date_acte', ascending: false);
 
       if (mounted) {
@@ -67,7 +69,7 @@ class _HistoriqueMedicalEleveurState
         });
       }
     } catch (e) {
-      debugPrint('❌ Erreur chargement historique éleveur: $e');
+      debugPrint('Erreur chargement historique éleveur: $e');
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -82,15 +84,16 @@ class _HistoriqueMedicalEleveurState
   }
 
   List<Map<String, dynamic>> get _historiqueFiltre {
-    if (_filtre == 'Tout') return _historique;
-    if (_filtre == 'Consultations') {
+    // ✅ FiltreHistorique.tout / .consultation / .vaccination
+    if (_filtre == FiltreHistorique.tout) return _historique;
+    if (_filtre == FiltreHistorique.consultation) {
       return _historique
-          .where((item) => item['type_acte'] == 'consultation')
+          .where((item) => item['type_acte'] == TypeActe.consultation)
           .toList();
     }
-    if (_filtre == 'Vaccinations') {
+    if (_filtre == FiltreHistorique.vaccination) {
       return _historique
-          .where((item) => item['type_acte'] == 'vaccination')
+          .where((item) => item['type_acte'] == TypeActe.vaccination)
           .toList();
     }
     return _historique;
@@ -122,8 +125,8 @@ class _HistoriqueMedicalEleveurState
                 padding: const EdgeInsets.only(right: 8),
                 child: Text(
                   '${_historique.length} acte(s)',
-                  style:
-                      const TextStyle(fontSize: 13, color: Colors.white70),
+                  style: const TextStyle(
+                      fontSize: 13, color: Colors.white70),
                 ),
               ),
             ),
@@ -135,7 +138,6 @@ class _HistoriqueMedicalEleveurState
       ),
       body: Column(
         children: [
-          // Bannière sécurité + performance
           Container(
             width: double.infinity,
             padding:
@@ -148,7 +150,7 @@ class _HistoriqueMedicalEleveurState
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '🔒 Affichage limité à vos animaux — chargement optimisé',
+                    'Affichage limité à vos animaux — lecture seule',
                     style: TextStyle(
                         fontSize: 12,
                         color: Colors.green[900],
@@ -158,13 +160,11 @@ class _HistoriqueMedicalEleveurState
               ],
             ),
           ),
-
           _buildFilterChips(),
-
           if (!_isLoading && _historiqueFiltre.isNotEmpty)
             Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 4),
               child: Row(children: [
                 Text(
                   '${_historiqueFiltre.length} enregistrement${_historiqueFiltre.length > 1 ? 's' : ''}',
@@ -175,7 +175,6 @@ class _HistoriqueMedicalEleveurState
                 ),
               ]),
             ),
-
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -197,20 +196,21 @@ class _HistoriqueMedicalEleveurState
   }
 
   Widget _buildFilterChips() {
-    final filtres = ['Tout', 'Consultations', 'Vaccinations'];
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          children: filtres.map((f) {
-            final isSelected = _filtre == f;
+          // ✅ Même liste FiltreHistorique.filtres que le vétérinaire
+          children: FiltreHistorique.filtres.map((f) {
+            final isSelected = _filtre == f['value'];
             return Padding(
               padding: const EdgeInsets.only(right: 8),
               child: FilterChip(
-                label: Text(f),
+                label: Text(f['label']!),
                 selected: isSelected,
-                onSelected: (_) => setState(() => _filtre = f),
+                onSelected: (_) =>
+                    setState(() => _filtre = f['value']!),
                 selectedColor: Colors.green[200],
                 checkmarkColor: Colors.green[900],
               ),
@@ -222,7 +222,9 @@ class _HistoriqueMedicalEleveurState
   }
 
   Widget _buildItem(Map<String, dynamic> item, int index) {
-    final isConsultation = item['type_acte'] == 'consultation';
+    // ✅ TypeActe.consultation au lieu de 'consultation'
+    final isConsultation =
+        item['type_acte'] == TypeActe.consultation;
     final couleur = isConsultation ? Colors.green : Colors.blue;
     final icone =
         isConsultation ? Icons.medical_services : Icons.vaccines;
@@ -282,8 +284,10 @@ class _HistoriqueMedicalEleveurState
                           ),
                           child: Text(
                             isConsultation
-                                ? 'CONSULTATION'
-                                : 'VACCINATION',
+                                ? FiltreHistorique.labelConsultation
+                                    .toUpperCase()
+                                : FiltreHistorique.labelVaccination
+                                    .toUpperCase(),
                             style: TextStyle(
                                 fontSize: 10,
                                 color: couleur,
@@ -312,13 +316,14 @@ class _HistoriqueMedicalEleveurState
                           item['animal_race'].toString().isNotEmpty)
                         Text(' (${item['animal_race']})',
                             style: TextStyle(
-                                fontSize: 13, color: Colors.grey[600])),
+                                fontSize: 13,
+                                color: Colors.grey[600])),
                     ]),
                     const SizedBox(height: 4),
                     Text(
                       item['description'] ?? '',
-                      style:
-                          TextStyle(fontSize: 13, color: Colors.grey[600]),
+                      style: TextStyle(
+                          fontSize: 13, color: Colors.grey[600]),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -342,9 +347,10 @@ class _HistoriqueMedicalEleveurState
 
   Widget _buildEmptyState() {
     String msg;
-    if (_filtre == 'Consultations') {
+    // ✅ FiltreHistorique.consultation au lieu de 'Consultations'
+    if (_filtre == FiltreHistorique.consultation) {
       msg = 'Aucune consultation enregistrée';
-    } else if (_filtre == 'Vaccinations') {
+    } else if (_filtre == FiltreHistorique.vaccination) {
       msg = 'Aucune vaccination enregistrée';
     } else {
       msg = 'Aucun historique médical';
@@ -360,15 +366,15 @@ class _HistoriqueMedicalEleveurState
               style: TextStyle(fontSize: 18, color: Colors.grey[600])),
           const SizedBox(height: 8),
           Text('Les soins vétérinaires apparaîtront ici',
-              style:
-                  TextStyle(fontSize: 14, color: Colors.grey[500])),
+              style: TextStyle(fontSize: 14, color: Colors.grey[500])),
         ],
       ),
     );
   }
 
   void _showDetail(Map<String, dynamic> item) {
-    final isConsultation = item['type_acte'] == 'consultation';
+    final isConsultation =
+        item['type_acte'] == TypeActe.consultation;
     final couleur = isConsultation ? Colors.green : Colors.blue;
     final icone =
         isConsultation ? Icons.medical_services : Icons.vaccines;
@@ -382,7 +388,6 @@ class _HistoriqueMedicalEleveurState
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // En-tête
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -411,13 +416,11 @@ class _HistoriqueMedicalEleveurState
                   ],
                 ),
               ),
-
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Bannière lecture seule
                     Container(
                       padding: const EdgeInsets.all(10),
                       margin: const EdgeInsets.only(bottom: 14),
@@ -432,14 +435,14 @@ class _HistoriqueMedicalEleveurState
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Mode consultation — vous ne pouvez pas modifier ces informations',
+                            'Mode consultation — informations non modifiables',
                             style: TextStyle(
-                                fontSize: 12, color: Colors.blue[900]),
+                                fontSize: 12,
+                                color: Colors.blue[900]),
                           ),
                         ),
                       ]),
                     ),
-
                     _detailRow('Date',
                         _formatDate(item['date_acte']?.toString()),
                         Icons.calendar_today),
@@ -448,19 +451,19 @@ class _HistoriqueMedicalEleveurState
                         '${item['animal_nom'] ?? 'Inconnu'}'
                             '${item['animal_race'] != null && item['animal_race'].toString().isNotEmpty ? ' (${item['animal_race']})' : ''}',
                         Icons.pets),
-                    _detailRow('Vétérinaire',
+                    _detailRow(
+                        'Vétérinaire',
                         item['veterinaire_nom'] ?? 'Dr. Inconnu',
                         Icons.person),
-
                     if (isConsultation) ...[
                       if (item['diagnostic'] != null &&
                           item['diagnostic'].toString().isNotEmpty)
-                        _sectionBox('Diagnostic', item['diagnostic'],
-                            Colors.green),
+                        _sectionBox('Diagnostic',
+                            item['diagnostic'], Colors.green),
                       if (item['traitement'] != null &&
                           item['traitement'].toString().isNotEmpty)
-                        _sectionBox('Traitement', item['traitement'],
-                            Colors.orange),
+                        _sectionBox('Traitement',
+                            item['traitement'], Colors.orange),
                     ] else ...[
                       const SizedBox(height: 8),
                       _detailRow('Vaccin',
@@ -474,12 +477,10 @@ class _HistoriqueMedicalEleveurState
                         _detailRow(
                             'N° de lot', item['lot'], Icons.tag),
                     ],
-
                     if (item['observations'] != null &&
                         item['observations'].toString().isNotEmpty)
                       _sectionBox('Observations',
                           item['observations'], Colors.grey),
-
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
@@ -487,8 +488,8 @@ class _HistoriqueMedicalEleveurState
                         onPressed: () => Navigator.pop(context),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: couleur,
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 14),
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 14),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8)),
                         ),
