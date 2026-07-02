@@ -1,7 +1,12 @@
 // ============================================================
-// ANIMAL ACHETÉ - VERSION BLE CORRIGÉE
+// ANIMAL ACHETÉ - VERSION BLE CORRIGÉE (DESIGN ALIGNÉ)
 // Fichier: lib/Eleveures/Ajouter Animal/AnimalAchateBluetooth.dart
 // Communication Bluetooth BLE avec ESP32 + RFID
+//
+// NOTE : Seul le DESIGN (couleurs, style des champs, badges de
+// confirmation) a été aligné sur NouveauNeeBluetooth.dart.
+// Aucune logique (BLE, Supabase, validations) n'a été ajoutée,
+// supprimée ou modifiée.
 // ============================================================
 
 import 'dart:io';
@@ -54,6 +59,12 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   String? _lastReceivedUID;
   DateTime? _lastScanTime;
   static const Duration _antiSpamDelay = Duration(seconds: 2);
+
+  // ===== COULEURS DES CHAMPS (alignées sur NouveauNeeBluetooth) =====
+  static const Color _couleurNom = Color(0xFF2E7D32);
+  static const Color _couleurSexe = Color(0xFF6A1B9A);
+  static const Color _couleurRace = Color(0xFF00838F);
+  static const Color _couleurProvenance = Color(0xFFE65100);
 
   @override
   void initState() {
@@ -757,7 +768,9 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
     );
   }
 
-  // ===== UI =====
+  // ====================================================================
+  // BUILD
+  // ====================================================================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -791,22 +804,259 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
                   const SizedBox(height: 16),
                   _buildPhotoSection(),
                   const SizedBox(height: 16),
-                  _buildTextField(_nomController, "Nom *", Icons.pets),
+
+                  _buildChampStyleParent(
+                    label: "Nom",
+                    icone: Icons.pets,
+                    couleur: _couleurNom,
+                    valeur: _nomController.text.trim().isEmpty ? null : _nomController.text.trim(),
+                    resume: _nomController.text.trim().isEmpty ? null : _nomController.text.trim(),
+                    champSaisie: TextFormField(
+                      controller: _nomController,
+                      onChanged: (_) => setState(() {}),
+                      decoration: _inputDeco(
+                        "Saisir le nom…",
+                        Icons.pets,
+                        _couleurNom,
+                        suffixClear: _nomController.text.isNotEmpty,
+                        onClear: () { _nomController.clear(); setState(() {}); },
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 12),
-                  _buildSexeDropdown(),
+
+                  _buildChampStyleParent(
+                    label: "Sexe",
+                    icone: Icons.wc,
+                    couleur: _couleurSexe,
+                    valeur: _selectedSexe,
+                    resume: _selectedSexe,
+                    champSaisie: _buildSexeDropdownStyled(),
+                  ),
                   const SizedBox(height: 12),
-                  _buildTextField(_provenanceController, "Provenance *", Icons.location_on),
+
+                  _buildChampStyleParent(
+                    label: "Provenance",
+                    icone: Icons.location_on,
+                    couleur: _couleurProvenance,
+                    valeur: _provenanceController.text.trim().isEmpty ? null : _provenanceController.text.trim(),
+                    resume: _provenanceController.text.trim().isEmpty ? null : _provenanceController.text.trim(),
+                    champSaisie: TextFormField(
+                      controller: _provenanceController,
+                      onChanged: (_) => setState(() {}),
+                      decoration: _inputDeco(
+                        "Saisir la provenance…",
+                        Icons.location_on,
+                        _couleurProvenance,
+                        suffixClear: _provenanceController.text.isNotEmpty,
+                        onClear: () { _provenanceController.clear(); setState(() {}); },
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 12),
-                  _buildRaceDropdown(),
+
+                  _buildChampStyleParent(
+                    label: "Race",
+                    icone: Icons.agriculture,
+                    couleur: _couleurRace,
+                    valeur: _selectedRace,
+                    resume: _selectedRace,
+                    champSaisie: _buildRaceDropdownStyled(),
+                  ),
                   const SizedBox(height: 12),
-                  _buildUidField(),
+
+                  _buildChampStyleParent(
+                    label: "UID RFID",
+                    icone: Icons.nfc,
+                    couleur: _tagRFID != null ? Colors.teal : Colors.grey,
+                    valeur: _tagRFID,
+                    resume: _tagRFID != null ? "Tag détecté : $_tagRFID" : null,
+                    champSaisie: _buildUidFieldStyled(),
+                  ),
                   const SizedBox(height: 24),
+
                   _buildSaveButton(),
+                  const SizedBox(height: 20),
                 ],
               ),
             ),
     );
   }
+
+  // ====================================================================
+  // WIDGETS CHAMPS GÉNÉRIQUES (identiques à NouveauNeeBluetooth)
+  // ====================================================================
+
+  Widget _buildChampStyleParent({
+    required String label,
+    required IconData icone,
+    required Color couleur,
+    required String? valeur,
+    required String? resume,
+    required Widget champSaisie,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(
+            children: [
+              Icon(icone, size: 18, color: couleur),
+              const SizedBox(width: 6),
+              Text(
+                "$label *",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: couleur,
+                ),
+              ),
+            ],
+          ),
+        ),
+        champSaisie,
+        if (valeur != null && valeur.isNotEmpty)
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: couleur.withOpacity(0.07),
+              border: Border.all(color: couleur.withOpacity(0.4)),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: couleur.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Icon(icone, size: 20, color: couleur),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    resume ?? valeur,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: couleur,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                Icon(Icons.check_circle, color: couleur, size: 20),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  InputDecoration _inputDeco(
+    String hint,
+    IconData prefixIcon,
+    Color couleur, {
+    bool suffixClear = false,
+    VoidCallback? onClear,
+  }) {
+    return InputDecoration(
+      hintText: hint,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: couleur.withOpacity(0.5)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: couleur.withOpacity(0.5)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: couleur, width: 2),
+      ),
+      prefixIcon: Icon(prefixIcon, color: couleur),
+      suffixIcon: suffixClear && onClear != null
+          ? IconButton(
+              icon: const Icon(Icons.close, size: 18),
+              tooltip: "Effacer",
+              onPressed: onClear,
+            )
+          : null,
+    );
+  }
+
+  Widget _buildSexeDropdownStyled() {
+    return DropdownButtonFormField<String>(
+      value: _selectedSexe,
+      decoration: _inputDeco("Choisir le sexe…", Icons.wc, _couleurSexe),
+      items: const [
+        DropdownMenuItem(value: "Mâle", child: Text("Mâle")),
+        DropdownMenuItem(value: "Femelle", child: Text("Femelle")),
+      ],
+      onChanged: (val) => setState(() => _selectedSexe = val),
+    );
+  }
+
+  Widget _buildRaceDropdownStyled() {
+    return DropdownButtonFormField<String>(
+      value: _selectedRace,
+      decoration: _inputDeco("Choisir la race…", Icons.agriculture, _couleurRace),
+      items: const [
+        DropdownMenuItem(value: "Ladoum", child: Text("Ladoum")),
+        DropdownMenuItem(value: "Peulh Peulh", child: Text("Peulh Peulh")),
+        DropdownMenuItem(value: "Touabire", child: Text("Touabire")),
+      ],
+      onChanged: (val) {
+        setState(() {
+          _selectedRace = val;
+          if (val != null) _raceController.text = val;
+        });
+      },
+    );
+  }
+
+  Widget _buildUidFieldStyled() {
+    final couleur = _tagRFID != null ? Colors.teal : Colors.grey;
+    return TextFormField(
+      controller: _uidController,
+      readOnly: true,
+      enabled: false,
+      decoration: InputDecoration(
+        hintText: "En attente du scan RFID…",
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: couleur.withOpacity(0.5)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: couleur.withOpacity(0.5)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: couleur, width: 2),
+        ),
+        prefixIcon: Icon(Icons.nfc, color: couleur),
+        suffixIcon: _tagRFID != null
+            ? const Icon(Icons.check_circle, color: Colors.teal)
+            : const Icon(Icons.pending, color: Colors.orange),
+        helperText: _tagRFID == null
+            ? "Approchez le tag du lecteur BLE"
+            : "Tag détecté via BLE",
+        helperStyle: TextStyle(
+          color: _tagRFID == null ? Colors.grey : Colors.teal,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
+    );
+  }
+
+  // ====================================================================
+  // WIDGETS UI GÉNÉRIQUES (identiques à NouveauNeeBluetooth)
+  // ====================================================================
 
   Widget _buildBLEStatusCard() {
     String statusText;
@@ -886,75 +1136,10 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
     );
   }
 
-  Widget _buildTextField(TextEditingController controller, String label, IconData icon) {
-    return TextFormField(
-      controller: controller,
-      decoration: InputDecoration(
-        labelText: label, border: const OutlineInputBorder(), prefixIcon: Icon(icon),
-      ),
-    );
-  }
-
-  Widget _buildSexeDropdown() {
-    return DropdownButtonFormField<String>(
-      value: _selectedSexe,
-      decoration: const InputDecoration(
-        labelText: "Sexe *", border: OutlineInputBorder(), prefixIcon: Icon(Icons.wc),
-      ),
-      items: const [
-        DropdownMenuItem(value: "Mâle", child: Text("Mâle")),
-        DropdownMenuItem(value: "Femelle", child: Text("Femelle")),
-      ],
-      onChanged: (val) => setState(() => _selectedSexe = val),
-    );
-  }
-
-  Widget _buildRaceDropdown() {
-    return DropdownButtonFormField<String>(
-      value: _selectedRace,
-      decoration: const InputDecoration(
-        labelText: "Race *", border: OutlineInputBorder(), prefixIcon: Icon(Icons.agriculture),
-      ),
-      items: const [
-        DropdownMenuItem(value: "Ladoum", child: Text("Ladoum")),
-        DropdownMenuItem(value: "Peulh Peulh", child: Text("Peulh Peulh")),
-        DropdownMenuItem(value: "Touabire", child: Text("Touabire")),
-      ],
-      onChanged: (val) {
-        setState(() {
-          _selectedRace = val;
-          if (val != null) _raceController.text = val;
-        });
-      },
-    );
-  }
-
-  Widget _buildUidField() {
-    return TextFormField(
-      controller: _uidController,
-      readOnly: true,
-      enabled: false,
-      decoration: InputDecoration(
-        labelText: "UID RFID *",
-        border: const OutlineInputBorder(),
-        prefixIcon: const Icon(Icons.nfc),
-        suffixIcon: _tagRFID != null
-            ? const Icon(Icons.check_circle, color: Colors.green)
-            : const Icon(Icons.pending, color: Colors.orange),
-        helperText: _tagRFID == null ? "En attente du scan..." : "Tag détecté via BLE",
-        helperStyle: TextStyle(
-          color: _tagRFID == null ? Colors.grey : Colors.green,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
-    );
-  }
-
   Widget _buildSaveButton() {
     return SizedBox(
       width: double.infinity,
-      height: 48,
+      height: 52,
       child: ElevatedButton.icon(
         onPressed: _isLoading ? null : _enregistrer,
         icon: _isLoading
@@ -968,7 +1153,9 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
           style: const TextStyle(fontSize: 16),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.green[700], foregroundColor: Colors.white,
+          backgroundColor: Colors.green[700],
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       ),
     );

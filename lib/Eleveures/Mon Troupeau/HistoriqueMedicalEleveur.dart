@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 // ✅ ÉTAPE 4 : Import des constantes partagées
 import 'package:depart/constants.dart';
+// ✅ ÉTAPE 5 : Messagerie éleveur → vétérinaire
+import 'package:depart/Eleveures/Messagerie/MessageriePage.dart';
+// ✅ ÉTAPE 6 : Export PDF carnet de santé
+import 'package:depart/Eleveures/PDF/CarnetSantePdfService.dart';
 
 // ============================================================
 // HISTORIQUE MÉDICAL ÉLEVEUR (LECTURE SEULE)
@@ -23,6 +27,8 @@ class _HistoriqueMedicalEleveurState
   final supabase = Supabase.instance.client;
   List<Map<String, dynamic>> _historique = [];
   bool _isLoading = true;
+  bool _exportEnCours = false; // ✅ ÉTAPE 6
+  String _nomEleveur = ''; // ✅ ÉTAPE 6
 
   // ✅ Même valeur que le vétérinaire : FiltreHistorique.tout = 'tout'
   // Avant : éleveur avait 'Tout', vétérinaire avait 'tout' → incohérence
@@ -34,6 +40,7 @@ class _HistoriqueMedicalEleveurState
     super.initState();
     _eleveurId = supabase.auth.currentUser?.id;
     _chargerHistorique();
+    _chargerNomEleveur(); // ✅ ÉTAPE 6
   }
 
   Future<void> _chargerHistorique() async {
@@ -77,6 +84,88 @@ class _HistoriqueMedicalEleveurState
             content: Text('Erreur: ${e.toString()}'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  }
+
+  // ✅ ÉTAPE 6 : Charger le nom de l'éleveur
+  Future<void> _chargerNomEleveur() async {
+    if (_eleveurId == null) return;
+    try {
+      final data = await supabase
+          .from(Tables.users)
+          .select('nom_complet, prenom, nom')
+          .eq('id', _eleveurId!)
+          .maybeSingle();
+      if (data != null && mounted) {
+        setState(() {
+          _nomEleveur = data['nom_complet'] ??
+              ((data['prenom'] != null && data['nom'] != null)
+                  ? '${data['prenom']} ${data['nom']}'
+                  : 'Éleveur');
+        });
+      }
+    } catch (_) {}
+  }
+
+  // ✅ ÉTAPE 6 : Exporter le PDF
+  Future<void> _exporterPDF() async {
+    if (_exportEnCours) return;
+    setState(() => _exportEnCours = true);
+
+    try {
+      // Filtrer consultations et vaccinations
+      final consultations = _historique
+          .where((item) => item['type_acte'] == TypeActe.consultation)
+          .toList();
+      final vaccinations = _historique
+          .where((item) => item['type_acte'] == TypeActe.vaccination)
+          .toList();
+
+      // Récupérer le premier animal pour l'en-tête
+      final premierAnimal = _historique.isNotEmpty ? Map<String, dynamic>.from(_historique.first) : <String, dynamic>{};
+
+      await CarnetSantePdfService.genererEtPartager(
+        context      : context,
+        animal       : premierAnimal,
+        consultations: consultations,
+        vaccinations : vaccinations,
+        nomEleveur   : _nomEleveur,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content        : Text('Erreur export PDF: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _exportEnCours = false);
+    }
+  }
+
+  // ✅ Export PDF d'une fiche individuelle
+  Future<void> _exporterFiche(Map<String, dynamic> item) async {
+    try {
+      final isConsultation = item['type_acte'] == TypeActe.consultation;
+
+      await CarnetSantePdfService.genererEtPartager(
+        context      : context,
+        animal       : Map<String, dynamic>.from(item),
+        consultations: isConsultation ? [item] : [],
+        vaccinations : isConsultation ? [] : [item],
+        nomEleveur   : _nomEleveur,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content        : Text('Erreur export: $e'),
+            backgroundColor: Colors.red,
           ),
         );
       }
@@ -129,6 +218,19 @@ class _HistoriqueMedicalEleveurState
                       fontSize: 13, color: Colors.white70),
                 ),
               ),
+            ),
+          // ✅ ÉTAPE 6 : Bouton export PDF
+          if (!_isLoading && _historique.isNotEmpty)
+            IconButton(
+              icon: _exportEnCours
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.picture_as_pdf),
+              tooltip  : 'Exporter le carnet de santé',
+              onPressed: _exportEnCours ? null : _exporterPDF,
             ),
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -482,6 +584,65 @@ class _HistoriqueMedicalEleveurState
                       _sectionBox('Observations',
                           item['observations'], Colors.grey),
                     const SizedBox(height: 16),
+                    // ✅ ÉTAPE 5 : Bouton Contacter le vétérinaire
+                    if (item['veterinaire_id'] != null)
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => MessageriePage(
+                                  interlocuteurId : item['veterinaire_id'].toString(),
+                                  interlocuteurNom: item['veterinaire_nom']?.toString() ?? 'Vétérinaire',
+                                  animalId        : item['animal_id']?.toString(),
+                                  animalSource    : item['source']?.toString(),
+                                  animalNom       : item['animal_nom']?.toString(),
+                                ),
+                              ),
+                            );
+                          },
+                          icon : Icon(Icons.message, color: Colors.green[700]),
+                          label: Text(
+                            'Contacter ${item['veterinaire_nom']?.toString() ?? 'le vétérinaire'}',
+                            style: TextStyle(color: Colors.green[700], fontSize: 14),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            padding      : const EdgeInsets.symmetric(vertical: 12),
+                            side         : BorderSide(color: Colors.green[700]!),
+                            shape        : RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 8),
+                    // ✅ Bouton export PDF de cette fiche
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _exporterFiche(item);
+                        },
+                        icon : const Icon(Icons.picture_as_pdf,
+                            color: Colors.orange),
+                        label: const Text(
+                          'Exporter cette fiche en PDF',
+                          style: TextStyle(
+                              color    : Colors.orange,
+                              fontSize : 14),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          side   : const BorderSide(color: Colors.orange),
+                          shape  : RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(

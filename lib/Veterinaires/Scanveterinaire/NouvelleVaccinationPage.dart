@@ -235,15 +235,36 @@ class _NouvelleVaccinationPageState
       final rappelTxt = _dateRappel != null
           ? ' — Rappel le ${_formaterDate(_dateRappel!)}'
           : '';
+      final corpsNotif = '${_vaccController.text.trim()} — '
+          '${widget.animal['nom']?.toString() ?? 'Animal'}'
+          '$rappelTxt'
+          "\nL'éleveur a été notifié.";
+
       await NotificationService().afficherNotificationImmediateLocal(
         titre  : 'Vaccination enregistrée',
-        corps  : '${_vaccController.text.trim()} — '
-                 '${widget.animal['nom']?.toString() ?? 'Animal'}'
-                 '$rappelTxt'
-                 "\nL'éleveur a été notifié.",
+        corps  : corpsNotif,
         type   : 'consultation_validee',
         urgente: false,
       );
+
+      // 4. ✅ Push FCM au vétérinaire lui-même (confirmation sur téléphone)
+      if (veterinaire != null) {
+        try {
+          await supabase.functions.invoke(
+            'send-push-notification',
+            body: {
+              'user_id': veterinaire.id,
+              'title'  : 'Vaccination enregistrée',
+              'body'   : corpsNotif,
+              'type'   : 'consultation_validee',
+              'channel': 'alerte_channel',
+            },
+          );
+          debugPrint('Push FCM vaccination envoyé au vétérinaire');
+        } catch (e) {
+          debugPrint('Push FCM vétérinaire non envoyé (silencieux): \$e');
+        }
+      }
 
       if (mounted) {
         Navigator.pop(context, true);

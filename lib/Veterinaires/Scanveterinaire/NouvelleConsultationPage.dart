@@ -232,6 +232,27 @@ class _NouvelleConsultationPageState
         urgente: false,
       );
 
+      // 4. ✅ Push FCM au vétérinaire lui-même (confirmation sur téléphone)
+      if (veterinaire != null) {
+        try {
+          await supabase.functions.invoke(
+            'send-push-notification',
+            body: {
+              'user_id': veterinaire.id,
+              'title'  : 'Consultation enregistrée',
+              'body'   : '${_motifController.text.trim()} — '
+                         '${widget.animal['nom']?.toString() ?? 'Animal'}'
+                         '\nL\'éleveur a été notifié.',
+              'type'   : 'consultation_validee',
+              'channel': 'alerte_channel',
+            },
+          );
+          debugPrint('Push FCM consultation envoyé au vétérinaire');
+        } catch (e) {
+          debugPrint('Push FCM vétérinaire non envoyé (silencieux): \$e');
+        }
+      }
+
       if (mounted) {
         Navigator.pop(context, true);
       }

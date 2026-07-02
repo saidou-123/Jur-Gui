@@ -756,6 +756,55 @@ class NotificationService {
       debugPrint('❌ Erreur notification vétérinaire: $e');
     }
   }
+
+  // ============================================================
+  // ★ INSCRIPTION : rappel de confirmation d'email
+  // Déclenché juste après l'inscription (éleveur ou vétérinaire).
+  // Notification locale immédiate + push (utile si l'app est fermée).
+  // Non bloquant : un échec ici ne doit jamais empêcher l'inscription.
+  // ============================================================
+  Future<void> notifierInscriptionEnAttenteConfirmation({
+    required String userId,
+  }) async {
+    const titre = '📩 Confirmez votre email';
+    const corps = 'Un email de confirmation vous a été envoyé. '
+        'Cliquez sur le lien pour activer votre compte Jur-Gui.';
+
+    // Notification locale immédiate (l'app est ouverte juste après l'inscription).
+    await afficherNotificationImmediateLocal(
+      titre  : titre,
+      corps  : corps,
+      type   : 'confirmation_email',
+      urgente: false,
+    );
+
+    // Notification push (utile si l'utilisateur a déjà fermé l'app).
+    try {
+      await supabase.functions.invoke('send-push-notification', body: {
+        'user_id': userId,
+        'title'  : titre,
+        'body'   : corps,
+        'type'   : 'confirmation_email',
+        'channel': 'reproduction_channel',
+      });
+    } catch (e) {
+      debugPrint('⚠️ Push confirmation email échoué (non bloquant): $e');
+    }
+  }
+
+  // ============================================================
+  // ★ COMPTE CONFIRMÉ : notification locale après confirmation
+  // Déclenché lorsque l'app détecte que email_confirmed_at est rempli
+  // (par exemple au retour dans l'app après avoir cliqué le lien).
+  // ============================================================
+  Future<void> notifierCompteConfirme() async {
+    await afficherNotificationImmediateLocal(
+      titre  : '✅ Email confirmé',
+      corps  : 'Votre adresse email a été confirmée. Vous pouvez vous connecter.',
+      type   : 'email_confirme',
+      urgente: false,
+    );
+  }
  
   Future<void> notifierEleveurConsultation({
     required String eleveurId,
