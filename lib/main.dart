@@ -4,12 +4,15 @@
 //   ajoutées dans _naviguerDepuisNotification()
 // ============================================================
  
+import 'dart:async';
+
 import 'package:depart/AlertesPage.dart';
 import 'package:depart/Eleveures/New/Accouplemt/Accouplement..dart';
 import 'package:depart/Eleveures/New/Notification/NotificationIdManager.dart';
 import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
 import 'package:depart/Eleveures/New/chaleur/ChaleurModule.dart';
 import 'package:depart/pages/Bienvenue/acceuil.dart';
+import 'package:depart/pages/Bienvenue/descriptionPages/homePage.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -74,9 +77,6 @@ Future<void> _initSecondaire() async {
     if (tzName.isEmpty) tzName = 'UTC';
     tz.setLocalLocation(tz.getLocation(tzName));
     debugPrint('✅ Timezone: $tzName');
-  } catch (e) {
-    tz.setLocalLocation(tz.UTC);
-    debugPrint('⚠️ Timezone fallback UTC: $e');
   } catch (e) {
     tz.setLocalLocation(tz.UTC);
     debugPrint('⚠️ Timezone fallback UTC: $e');
@@ -239,7 +239,7 @@ class MyApp extends StatelessWidget {
       navigatorKey              : NotificationService().navigatorKey,
       color                     : Colors.white,
       title                     : 'Jur-Gui',
-      home                      : const Acceuil(),
+      home                      :  Homepage(),
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorSchemeSeed         : const Color(0xFF1B5E20),
@@ -292,13 +292,3 @@ class MyApp extends StatelessWidget {
     );
   }
 }
- 
-// ============================================================
-// HELPER — fire and forget sans warning lint
-// ============================================================
-void unawaited(Future<void> future) {
-  future.catchError((dynamic e) {
-    debugPrint('⚠️ unawaited error: $e');
-  });
-}
- 

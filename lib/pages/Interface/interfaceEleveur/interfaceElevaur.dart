@@ -16,6 +16,8 @@ import 'package:depart/Eleveures/New/Notification/NotificationsViewPage.dart';
 import 'package:depart/Eleveures/New/chaleur/ChaleurModule.dart';
 import 'package:depart/Eleveures/New/genealogique/ArbreGenealogique.dart';
 import 'package:depart/Eleveures/New/Copilot/CopilotPage.dart';
+// ✅ NOUVEAU — Import page notifications réelles
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:depart/Eleveures/Mon%20Troupeau/Mon_Troupeau.dart';
@@ -154,16 +156,111 @@ class _interfaceElevaureState extends State<interfaceElevaur>
   // ─────────────────────────────────────────────────────────
   // ✅ NOUVEAU : Ouvrir la page notifications et rafraîchir le badge
   // ─────────────────────────────────────────────────────────
+  // ✅ Dialog de choix entre les deux types de notifications
   Future<void> _ouvrirNotifications() async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const NotificationsPage()),
+    await showModalBottomSheet(
+      context   : context,
+      shape     : const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder   : (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Mes Notifications',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+
+            // Option 1 : Notifications vétérinaire
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.medical_services, color: Colors.green[700]),
+              ),
+              title: const Text(
+                'Notifications vétérinaire',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              subtitle: Text(
+                _notifNonLues > 0
+                    ? 'Consultations et vaccinations · $_notifNonLues non lue(s)'
+                    : 'Consultations et vaccinations reçues',
+                style: const TextStyle(fontSize: 12),
+              ),
+              trailing: _notifNonLues > 0
+                  ? Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '$_notifNonLues',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    )
+                  : const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const NotificationsPage()),
+                );
+                if (mounted) {
+                  setState(() => _selectedIndex = 0);
+                  _chargerCompteurNotifs();
+                }
+              },
+            ),
+
+            const Divider(),
+
+            // Option 2 : Rappels élevage
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange[50],
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.alarm, color: Colors.orange[700]),
+              ),
+              title: const Text(
+                'Rappels élevage',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              subtitle: const Text(
+                'Chaleurs, agnelages, reproduction',
+                style: TextStyle(fontSize: 12),
+              ),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const NotificationsViewPage()),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
     );
-    // Après retour : rafraîchir le badge (l'éleveur a peut-être lu des notifs)
-    if (mounted) {
-      setState(() => _selectedIndex = 0);
-      _chargerCompteurNotifs();
-    }
   }
 
   // ===== ANIMATIONS =====
