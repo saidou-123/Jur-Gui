@@ -7,7 +7,9 @@ import 'package:depart/pages/Interface/interfaceEleveur/interfaceElevaur.dart';
 import 'package:depart/pages/Interface/interfaceVeterinaire/interfaceVeterinaire.dart';
 import 'package:depart/pages/Interface/VetPendingPage.dart';
 import 'package:depart/pages/Interface/VetRejectedPage.dart';
+import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
 import 'package:depart/pages/Bienvenue/inscription.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:depart/securite/ErrorHandler.dart';
 import 'package:depart/securite/Validators.dart';
 import 'package:depart/widgets/couleur.dart';
@@ -64,6 +66,20 @@ class _ConnexionState extends State<Connexion> {
       }
 
       debugPrint('✅ Utilisateur authentifié: ${response.user!.id}');
+
+      // ✅ Notification locale "email confirmé" — une seule fois,
+      // la première fois qu'on détecte que l'email vient d'être validé.
+      // Non bloquant : ne doit jamais empêcher la connexion.
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final dejaNotifie = prefs.getBool('email_confirme_notifie_${response.user!.id}') ?? false;
+        if (!dejaNotifie && response.user!.emailConfirmedAt != null) {
+          await NotificationService().notifierCompteConfirme();
+          await prefs.setBool('email_confirme_notifie_${response.user!.id}', true);
+        }
+      } catch (e) {
+        debugPrint('⚠️ Notification email confirmé échouée (non bloquant) : $e');
+      }
 
       // ✅ Récupérer le rôle (et le statut, utilisé uniquement pour les vétérinaires)
       final userData = await _supabase
@@ -203,7 +219,7 @@ class _ConnexionState extends State<Connexion> {
         shape: BoxShape.circle,
       ),
       child: Image.asset(
-        "assets/image/img3.png",
+        "assets/image/app_icon.png",
         width: 120,
         height: 120,
         errorBuilder: (context, error, stackTrace) {
@@ -230,7 +246,7 @@ class _ConnexionState extends State<Connexion> {
         ),
         const SizedBox(height: 8),
         Text(
-          "Connectez-vous à Jur Gui 4.0",
+          "Connectez-vous à Jur Gui",
           style: TextStyle(
             fontSize: 16,
             color: Colors.grey[600],

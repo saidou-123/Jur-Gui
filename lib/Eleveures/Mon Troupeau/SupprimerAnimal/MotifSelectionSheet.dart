@@ -172,7 +172,7 @@ class _MotifSelectionSheetState extends State<_MotifSelectionSheet> {
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: isSelected ? motif.color.withOpacity(0.08) : Colors.grey[50],
+          color: isSelected ? motif.color.withValues(alpha: 0.08) : Colors.grey[50],
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isSelected ? motif.color : Colors.grey[200]!,
@@ -184,7 +184,7 @@ class _MotifSelectionSheetState extends State<_MotifSelectionSheet> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: motif.color.withOpacity(0.12),
+                color: motif.color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(motif.icon, color: motif.color, size: 22),

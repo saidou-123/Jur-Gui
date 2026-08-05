@@ -347,12 +347,8 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
         _heureAccouplement.minute,
       );
  
-      final brebisId = _brebisSelectionnee!['id'] is String
-          ? int.parse(_brebisSelectionnee!['id'])
-          : _brebisSelectionnee!['id'] as int;
-      final belierId = _belierSelectionne!['id'] is String
-          ? int.parse(_belierSelectionne!['id'])
-          : _belierSelectionne!['id'] as int;
+      final brebisId = _brebisSelectionnee!['id'];
+      final belierId = _belierSelectionne!['id'];
  
       // Vérification métier
       final validation = await _businessService.peutAccoupler(
@@ -400,8 +396,6 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
         'ancetres_communs_ia'  : _resultatIa?.ancetresCommuns.join(', '),
         'confiance_ia'         : _resultatIa?.confiance,
         'methode_ia'           : _resultatIa?.methode,
-        'confiance_risque'     : _resultatIa?.confianceRisque,
-        'confiance_acceptable' : _resultatIa?.confianceAcceptable,
         'message_ia'           : _resultatIa?.message,
         'action_ia'            : _resultatIa?.action,
         // ── Colonnes étape 5 ────────────────────────────────

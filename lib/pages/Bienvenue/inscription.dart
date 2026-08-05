@@ -445,7 +445,7 @@ class _InscriptionState extends State<Inscription> {
         shape: BoxShape.circle,
       ),
       child: Image.asset(
-        "assets/image/img3.png",
+        "assets/image/app_icon.png",
         width: 120,
         height: 120,
         errorBuilder: (context, error, stackTrace) {
@@ -472,7 +472,7 @@ class _InscriptionState extends State<Inscription> {
         ),
         const SizedBox(height: 8),
         Text(
-          "Connectez-vous à Jur Gui 4.0",
+          "Connectez-vous à Jur Gui",
           style: TextStyle(
             fontSize: 16,
             color: Colors.grey[600],
@@ -509,7 +509,7 @@ class _InscriptionState extends State<Inscription> {
                   role: 'eleveur',
                   titre: '🐑 Éleveur',
                   description: 'Gérer mon troupeau',
-                  icon: Icons.agriculture,
+                  icon: Icons.person,
                   color: Colors.green,
                 ),
               ),

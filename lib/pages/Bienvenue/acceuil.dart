@@ -1,11 +1,11 @@
 //
 
 // ============================================================
-// PAGE D'ACCUEIL - VERSION OPTIMISÉE
+// PAGE D'ACCUEIL - VERSION OPTIMISÉE (fond blanc)
 // Fichier: lib/pages/acceuil.dart
 // ============================================================
 
-import 'package:depart/pages/Bienvenue/connexion.dart';
+import 'package:depart/pages/Bienvenue/descriptionPages/homePage.dart';
 import 'package:depart/widgets/couleur.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
@@ -22,7 +22,7 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
   late Animation<double> _scaleAnimation;
-  
+
   Timer? _autoNavigateTimer;
 
   @override
@@ -91,7 +91,9 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
   void _navigateToLogin() {
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => const Connexion(),
+        // ★ Acceuil -> Homepage (onboarding). C'est Homepage qui navigue
+        //   ensuite vers Connexion quand l'utilisateur clique "Commencer".
+        pageBuilder: (context, animation, secondaryAnimation) => const Homepage(),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           const begin = Offset(1.0, 0.0);
           const end = Offset.zero;
@@ -114,20 +116,12 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // ★ Fond blanc uni (au lieu du dégradé de couleurs).
+      backgroundColor: Colors.white,
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Couleur.PremierColor,
-              Couleur.DeuxiemeColor,
-              Couleur.PremierColor.withOpacity(0.8),
-            ],
-          ),
-        ),
+        color: Colors.white,
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(24.0),
@@ -135,7 +129,7 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Spacer(),
-                
+
                 // Logo et titre animés
                 FadeTransition(
                   opacity: _fadeAnimation,
@@ -146,38 +140,31 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
                         // Logo
                         Container(
                           padding: const EdgeInsets.all(20),
-                        
-                         
                         ),
-                        
+
                         const SizedBox(height: 32),
-                        
+
                         // Titre
-                        const Text(
-                          "JUR GUI 4.0",
+                        // ★ Couleur passée de blanc à la couleur de la marque,
+                        //   pour rester lisible sur fond blanc.
+                        Text(
+                          "JUR GUI",
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 40,
-                            color: Colors.white,
+                            color: Couleur.PremierColor,
                             letterSpacing: 2,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black26,
-                                offset: Offset(2, 2),
-                                blurRadius: 4,
-                              ),
-                            ],
                           ),
                         ),
-                        
+
                         const SizedBox(height: 12),
-                        
+
                         // Sous-titre
                         Text(
                           "Gestion d'Élevage Intelligente",
                           style: TextStyle(
                             fontSize: 18,
-                            color: Colors.white.withOpacity(0.9),
+                            color: Colors.grey[700],
                             fontWeight: FontWeight.w500,
                           ),
                           textAlign: TextAlign.center,
@@ -186,9 +173,9 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
                     ),
                   ),
                 ),
-                
+
                 const SizedBox(height: 60),
-                
+
                 // Image animée
                 SlideTransition(
                   position: _slideAnimation,
@@ -199,7 +186,7 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.3),
+                            color: Colors.black.withOpacity(0.12),
                             blurRadius: 20,
                             offset: const Offset(0, 10),
                           ),
@@ -208,20 +195,20 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(20),
                         child: Image.asset(
-                          'assets/image/img2.png',
+                          'assets/image/app_icon.png',
                           height: 200,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) {
                             return Container(
                               height: 200,
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.2),
+                                color: Couleur.PremierColor.withOpacity(0.08),
                                 borderRadius: BorderRadius.circular(20),
                               ),
-                              child: const Icon(
+                              child: Icon(
                                 Icons.image,
                                 size: 80,
-                                color: Colors.white54,
+                                color: Couleur.PremierColor.withOpacity(0.4),
                               ),
                             );
                           },
@@ -230,9 +217,9 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
                     ),
                   ),
                 ),
-                
+
                 const SizedBox(height: 40),
-                
+
                 // Description
                 FadeTransition(
                   opacity: _fadeAnimation,
@@ -242,44 +229,34 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
-                      color: Colors.white.withOpacity(0.95),
+                      color: Colors.grey[800],
                       height: 1.5,
                     ),
                   ),
                 ),
-                
-                const Spacer(),
-                
-                // Bouton Commencer
 
-                      
-                      const SizedBox(height: 16),
-                      
-                      // Indicateur auto-navigation
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.info_outline,
-                            size: 16,
-                            color: Colors.white.withOpacity(0.7),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            "Navigation automatique dans 5s",
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.white.withOpacity(0.7),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                const Spacer(),
+
+                const SizedBox(height: 16),
+
+                // Indicateur auto-navigation
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: Colors.grey[500],
+                    ),
+                   
+                  ],
                 ),
+              ],
             ),
           ),
-        );
+        ),
+      ),
+    );
   }
 }
 
@@ -302,7 +279,7 @@ class _SplashScreenState extends State<SplashScreen> {
     await Future.delayed(const Duration(seconds: 3));
     if (mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const Connexion()),
+        MaterialPageRoute(builder: (context) => const Homepage()),
       );
     }
   }
@@ -310,41 +287,30 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Couleur.PremierColor,
-              Couleur.DeuxiemeColor,
-            ],
+      // ★ Fond blanc, cohérent avec Acceuil.
+      backgroundColor: Colors.white,
+      body: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.pets,
+            size: 100,
+            color: Couleur.PremierColor,
           ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.pets,
-              size: 100,
-              color: Colors.white,
+          const SizedBox(height: 24),
+          Text(
+            "JUR GUI",
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              color: Couleur.PremierColor,
             ),
-            const SizedBox(height: 24),
-            const Text(
-              "JUR GUI 4.0",
-              style: TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 40),
-            const CircularProgressIndicator(
-              color: Colors.white,
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 40),
+          CircularProgressIndicator(
+            color: Couleur.PremierColor,
+          ),
+        ],
       ),
     );
   }

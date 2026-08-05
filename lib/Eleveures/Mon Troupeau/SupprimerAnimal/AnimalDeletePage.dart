@@ -45,8 +45,14 @@ class _AnimalDeletePageState extends State<AnimalDeletePage> {
     setState(() => _isLoading = true);
 
     try {
-      final animals = await _service.getAnimauxActifs(filtre: _filtre);
-      final stats = await _service.getStatistiques();
+      // Les deux appels sont indépendants : on les lance en parallèle
+      // au lieu de les attendre l'un après l'autre.
+      final results = await Future.wait([
+        _service.getAnimauxActifs(filtre: _filtre),
+        _service.getStatistiques(),
+      ]);
+      final animals = results[0] as List<AnimalModel>;
+      final stats = results[1] as Map<String, int>;
 
       if (mounted) {
         setState(() {
@@ -108,6 +114,11 @@ class _AnimalDeletePageState extends State<AnimalDeletePage> {
       );
     }
 
+    // On garde une référence au Navigator AVANT l'await : si le widget
+    // est démonté pendant la requête, on peut quand même fermer le
+    // dialog de chargement (sinon il restait affiché indéfiniment).
+    final navigator = Navigator.of(context, rootNavigator: false);
+
     try {
       await _service.supprimerAnimal(
         animal: animal,
@@ -115,8 +126,9 @@ class _AnimalDeletePageState extends State<AnimalDeletePage> {
         transfertVersUserId: transfertVersUserId,
       );
 
+      navigator.pop(); // Fermer le loading, même si !mounted
+
       if (mounted) {
-        Navigator.pop(context); // Fermer le loading
         final message = transfertVersUserId != null
             ? '✅ ${animal.nom} marqué en attente de transfert'
             : '✅ ${animal.nom} retiré avec succès (${motif.label})';
@@ -124,8 +136,8 @@ class _AnimalDeletePageState extends State<AnimalDeletePage> {
         await _loadData();
       }
     } catch (e) {
+      navigator.pop(); // Fermer le loading, même si !mounted
       if (mounted) {
-        Navigator.pop(context); // Fermer le loading
         _showSnackBar('Erreur: ${e.toString()}', isError: true);
       }
     }
@@ -751,4 +763,4 @@ class _LoadingDialog extends StatelessWidget {
       ),
     );
   }
-} 
+}

@@ -1,6 +1,8 @@
 // ============================================================
-// INTERFACE VÉTÉRINAIRE - VERSION OPTIMISÉE AVEC BOTTOM NAV BAR
-// Fichier: lib/pages/Interface/interfaceVeterinaire.dart
+// INTERFACE VÉTÉRINAIRE
+// ✅ Badge notifications dynamique (temps réel)
+// ✅ Page notifications vétérinaire complète
+// ✅ Push FCM + notification locale
 // ============================================================
 
 import 'package:depart/Veterinaires/Sant%C3%A9Animale/FichesSante.dart';
@@ -13,6 +15,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:depart/securite/ErrorHandler.dart';
 import 'package:depart/securite/CachedData.dart';
 import 'package:depart/pages/Bienvenue/connexion.dart';
+import 'package:depart/constants.dart';
+// ✅ NOUVEAU — Page notifications vétérinaire
+import 'package:depart/Veterinaires/Notifications/NotificationsVeterinairePage.dart';
+// ✅ NOUVEAU — Page messagerie vétérinaire
+import 'package:depart/Veterinaires/Messagerie/MessagerieListeVeterinairePage.dart';
 
 class interfaceVeterinaire extends StatefulWidget {
   const interfaceVeterinaire({super.key});
@@ -24,18 +31,25 @@ class interfaceVeterinaire extends StatefulWidget {
 class _interfaceVeterinaireState extends State<interfaceVeterinaire>
     with SingleTickerProviderStateMixin {
   final _supabase = Supabase.instance.client;
-  final _cache = CacheManager();
+  final _cache    = CacheManager();
 
   late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
-  late Animation<Offset> _slideAnimation;
+  late Animation<double>   _fadeAnimation;
+  late Animation<Offset>   _slideAnimation;
 
   // État
-  int _totalAnimaux = 0;
-  int _consultationsEnCours = 0;
-  bool _isLoading = true;
-  String _userEmail = "";
-  String _userName = "";
+  int    _totalAnimaux         = 0;
+  int    _consultationsEnCours = 0;
+  bool   _isLoading            = true;
+  String _userEmail            = "";
+  String _userName             = "";
+
+  // ✅ Badge notifications
+  int _notifNonLues           = 0;
+  // ✅ Badge messagerie
+  int _messagesNonLus         = 0;
+  RealtimeChannel? _notifChannel;
+  RealtimeChannel? _msgChannel;
 
   // BottomNav
   int _selectedIndex = 0;
@@ -45,37 +59,190 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
     super.initState();
     _initAnimations();
     _initializeData();
+    // ✅ Charger les compteurs + écouter en temps réel
+    _chargerCompteurNotifs();
+    _chargerCompteurMessages();
+    _ecouterNotificationsTempsReel();
+    _ecouterMessagesTempsReel();
   }
 
   @override
   void dispose() {
     _animationController.dispose();
+    _notifChannel?.unsubscribe();
+    _msgChannel?.unsubscribe();
     super.dispose();
+  }
+
+  // ─── Badge notifications temps réel ───────────────────────
+  Future<void> _chargerCompteurNotifs() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null || !mounted) return;
+    try {
+      final result = await _supabase
+          .from(Tables.notifications)
+          .select('id')
+          .eq('destinataire_id', userId)
+          .eq('lu', false);
+      if (mounted) {
+        setState(() => _notifNonLues = (result as List).length);
+      }
+    } catch (e) {
+      debugPrint('Erreur compteur notifs vét: $e');
+    }
+  }
+
+  void _ecouterNotificationsTempsReel() {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    _notifChannel = _supabase
+        .channel('notifs_vet_$userId')
+        .onPostgresChanges(
+          event : PostgresChangeEvent.insert,
+          schema: 'public',
+          table : Tables.notifications,
+          filter: PostgresChangeFilter(
+            type  : PostgresChangeFilterType.eq,
+            column: 'destinataire_id',
+            value : userId,
+          ),
+          callback: (payload) {
+            if (mounted) {
+              setState(() => _notifNonLues++);
+              final titre = payload.newRecord['titre']?.toString()
+                  ?? 'Nouvelle notification';
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Row(
+                    children: [
+                      const Icon(Icons.notifications,
+                          color: Colors.white, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(titre,
+                            style: const TextStyle(fontSize: 13),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                    ],
+                  ),
+                  backgroundColor: Colors.blue[700],
+                  duration: const Duration(seconds: 4),
+                  action: SnackBarAction(
+                    label    : 'Voir',
+                    textColor: Colors.white,
+                    onPressed: _ouvrirNotifications,
+                  ),
+                ),
+              );
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  Future<void> _ouvrirNotifications() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => NotificationsVeterinairePage()),
+    );
+    if (mounted) {
+      setState(() => _selectedIndex = 0);
+      _chargerCompteurNotifs();
+    }
+  }
+
+  // ─── Compteur messages non lus ───────────────────────────
+  Future<void> _chargerCompteurMessages() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null || !mounted) return;
+    try {
+      final result = await _supabase
+          .from(Tables.messages)
+          .select('id')
+          .eq('destinataire_id', userId)
+          .eq('lu', false);
+      if (mounted) {
+        setState(() => _messagesNonLus = (result as List).length);
+      }
+    } catch (e) {
+      debugPrint('Erreur compteur messages vét: $e');
+    }
+  }
+
+  void _ecouterMessagesTempsReel() {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    _msgChannel = _supabase
+        .channel('msgs_vet_$userId')
+        .onPostgresChanges(
+          event   : PostgresChangeEvent.insert,
+          schema  : 'public',
+          table   : Tables.messages,
+          filter  : PostgresChangeFilter(
+            type  : PostgresChangeFilterType.eq,
+            column: 'destinataire_id',
+            value : userId,
+          ),
+          callback: (payload) {
+            if (mounted) {
+              setState(() => _messagesNonLus++);
+              final contenu = payload.newRecord['contenu']?.toString() ?? '';
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Row(children: [
+                    const Icon(Icons.message, color: Colors.white, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        contenu.length > 60 ? '\${contenu.substring(0,60)}...' : contenu,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ]),
+                  backgroundColor: Colors.green[700],
+                  duration: const Duration(seconds: 4),
+                  action: SnackBarAction(
+                    label    : 'Voir',
+                    textColor: Colors.white,
+                    onPressed: _ouvrirMessagerie,
+                  ),
+                ),
+              );
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  Future<void> _ouvrirMessagerie() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => MessagerieListeVeterinairePage()),
+    );
+    if (mounted) _chargerCompteurMessages();
   }
 
   // ===== ANIMATIONS =====
   void _initAnimations() {
     _animationController = AnimationController(
-      vsync: this,
+      vsync   : this,
       duration: const Duration(milliseconds: 900),
     );
-
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
+      CurvedAnimation(
+          parent: _animationController, curve: Curves.easeIn),
     );
-
     _slideAnimation = Tween<Offset>(
       begin: const Offset(0, 0.15),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-          parent: _animationController, curve: Curves.easeOutCubic),
-    );
-
+      end  : Offset.zero,
+    ).animate(CurvedAnimation(
+        parent: _animationController, curve: Curves.easeOutCubic));
     _animationController.forward();
   }
 
-  // ===== INITIALISATION =====
   Future<void> _initializeData() async {
     await Future.wait([
       _chargerInfoUtilisateur(),
@@ -83,14 +250,12 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
     ]);
   }
 
-  // ===== CHARGER INFO UTILISATEUR =====
   Future<void> _chargerInfoUtilisateur() async {
     try {
       final user = _supabase.auth.currentUser;
-
       if (user != null && mounted) {
         final userData = await _supabase
-            .from('users')
+            .from(Tables.users)
             .select('nom, prenom, nom_complet')
             .eq('id', user.id)
             .maybeSingle();
@@ -103,87 +268,65 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
         } else {
           name = user.email?.split('@').first.toUpperCase() ?? "Vétérinaire";
         }
-
         setState(() {
           _userEmail = user.email ?? "Non disponible";
-          _userName = name;
+          _userName  = name;
         });
-
         debugPrint("✅ Utilisateur vétérinaire chargé: $name");
       }
     } catch (e) {
       debugPrint("⚠️ Erreur chargement utilisateur: $e");
       setState(() {
-        _userName = "Vétérinaire";
+        _userName  = "Vétérinaire";
         _userEmail = _supabase.auth.currentUser?.email ?? "";
       });
     }
   }
 
-  // ===== CHARGER STATISTIQUES AVEC CACHE =====
   Future<void> _chargerStatistiques() async {
     if (!mounted) return;
-
     setState(() => _isLoading = true);
-
     try {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) throw Exception("Utilisateur non connecté");
 
       final stats = await _cache.getOrFetch<Map<String, int>>(
-        key: 'vet_stats_$userId',
+        key    : 'vet_stats_$userId',
         fetcher: () => _fetchStatistics(),
-        ttl: const Duration(minutes: 2),
+        ttl    : const Duration(minutes: 2),
       );
-
       if (mounted) {
         setState(() {
-          _totalAnimaux = stats['total'] ?? 0;
+          _totalAnimaux         = stats['total']         ?? 0;
           _consultationsEnCours = stats['consultations'] ?? 0;
-          _isLoading = false;
+          _isLoading            = false;
         });
       }
     } catch (error, stackTrace) {
-      ErrorHandler.log(
-        error,
-        stackTrace,
-        context: 'Chargement statistiques vétérinaire',
-      );
-
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      ErrorHandler.log(error, stackTrace,
+          context: 'Chargement statistiques vétérinaire');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // ===== RÉCUPÉRER STATISTIQUES =====
   Future<Map<String, int>> _fetchStatistics() async {
     debugPrint("📊 Chargement statistiques vétérinaire");
-
     final results = await Future.wait([
-      _supabase.from('nouveaux_nee').select('id').count(),
-      _supabase.from('animal_acheter').select('id').count(),
+      _supabase.from(Tables.nouveauxNee).select('id').count(),
+      _supabase.from(Tables.animalAcheter).select('id').count(),
     ]);
-
     final total = results[0].count + results[1].count;
-    final consultations = 0;
-
-    debugPrint(
-        "✅ Stats vétérinaire: Total=$total, Consultations=$consultations");
-
-    return {'total': total, 'consultations': consultations};
+    debugPrint("✅ Stats vétérinaire: Total=$total, Consultations=0");
+    return {'total': total, 'consultations': 0};
   }
 
-  // ===== DÉCONNEXION SÉCURISÉE =====
   Future<void> _handleLogout() async {
     final navigator = Navigator.of(context);
-
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+            borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
             Container(
@@ -199,13 +342,12 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
           ],
         ),
         content: const Text(
-          "Êtes-vous sûr de vouloir vous déconnecter ?",
-        ),
+            "Êtes-vous sûr de vouloir vous déconnecter ?"),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child:
-                Text("Annuler", style: TextStyle(color: Colors.grey[600])),
+            child: Text("Annuler",
+                style: TextStyle(color: Colors.grey[600])),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
@@ -218,90 +360,76 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
         ],
       ),
     );
-
     if (confirm != true) return;
-
     try {
+      _notifChannel?.unsubscribe();
       _cache.clear();
       await _supabase.auth.signOut();
-
       debugPrint("✅ Déconnexion vétérinaire réussie");
-
       navigator.pushReplacement(
-        MaterialPageRoute(builder: (_) => const Connexion()),
-      );
+          MaterialPageRoute(builder: (_) => const Connexion()));
     } catch (error, stackTrace) {
-      ErrorHandler.log(error, stackTrace, context: 'Déconnexion vétérinaire');
-      if (mounted) {
-        ErrorHandler.show(context, error);
-      }
+      ErrorHandler.log(error, stackTrace,
+          context: 'Déconnexion vétérinaire');
+      if (mounted) ErrorHandler.show(context, error);
     }
   }
 
-  // ===== RAFRAÎCHISSEMENT =====
   Future<void> _handleRefresh() async {
     final userId = _supabase.auth.currentUser?.id;
-    if (userId != null) {
-      _cache.invalidate('vet_stats_$userId');
-    }
-
-    await _initializeData();
-
-    if (mounted) {
-      ErrorHandler.showSuccess(context, "Données actualisées");
-    }
+    if (userId != null) _cache.invalidate('vet_stats_$userId');
+    await Future.wait([
+      _initializeData(),
+      _chargerCompteurNotifs(),
+    ]);
+    if (mounted) ErrorHandler.showSuccess(context, "Données actualisées");
   }
 
-  // ===== NAVIGATION BOTTOM BAR =====
   void _onNavTap(int index) {
     setState(() => _selectedIndex = index);
-
     switch (index) {
       case 0:
-        // Déjà sur l'accueil
         break;
       case 1:
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const FichesSante()),
-        ).then((_) => setState(() => _selectedIndex = 0));
+        Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const FichesSante()))
+            .then((_) => setState(() => _selectedIndex = 0));
         break;
       case 2:
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const Vaccinations()),
-        ).then((_) => setState(() => _selectedIndex = 0));
+        Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const Vaccinations()))
+            .then((_) => setState(() => _selectedIndex = 0));
         break;
       case 3:
         Navigator.push(
-          context,
-          MaterialPageRoute(
-              builder: (_) => const ScanRFIDVeterinaireBluetooth()),
-        ).then((_) => setState(() => _selectedIndex = 0));
+                context,
+                MaterialPageRoute(
+                    builder: (_) =>
+                        const ScanRFIDVeterinaireBluetooth()))
+            .then((_) => setState(() => _selectedIndex = 0));
         break;
     }
   }
 
-  // ===== BUILD PRINCIPAL =====
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      appBar: _buildAppBar(),
-      drawer: _buildDrawer(),
-      body: _isLoading
+      appBar         : _buildAppBar(),
+      drawer         : _buildDrawer(),
+      body           : _isLoading
           ? _buildLoadingState()
           : RefreshIndicator(
               onRefresh: _handleRefresh,
-              color: Colors.blue[700],
-              child: SingleChildScrollView(
+              color    : Colors.blue[700]!,
+              child    : SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
-                child: FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: SlideTransition(
+                child  : FadeTransition(
+                  opacity : _fadeAnimation,
+                  child   : SlideTransition(
                     position: _slideAnimation,
-                    child: Column(
+                    child   : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _buildWelcomeCard(),
@@ -324,108 +452,148 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
     );
   }
 
-  // ===== APP BAR =====
+  // ===== APP BAR avec badge dynamique =====
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       title: const Text(
         "JUR GUI - Vétérinaire",
-        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20,color:Colors.white ),
+        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
       ),
-      centerTitle: true,
+      centerTitle    : true,
       backgroundColor: Colors.white,
       foregroundColor: Colors.blue[700],
-      elevation: 2,
-      iconTheme: IconThemeData(color: Colors.blue[700]),
-      actions: [
+      elevation      : 2,
+      iconTheme      : IconThemeData(color: Colors.blue[700]),
+      actions        : [
+        // ✅ Bouton messagerie avec badge
+        Padding(
+          padding: const EdgeInsets.only(right: 4),
+          child: IconButton(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.chat_bubble_outline, color: Colors.blue[700]),
+                if (_messagesNonLus > 0)
+                  Positioned(
+                    right: -4,
+                    top  : -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(
+                          minWidth: 16, minHeight: 16),
+                      child: Text(
+                        _messagesNonLus > 99 ? '99+' : '$_messagesNonLus',
+                        style: const TextStyle(
+                            color     : Colors.white,
+                            fontSize  : 9,
+                            fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            onPressed: _ouvrirMessagerie,
+            tooltip: 'Messagerie',
+          ),
+        ),
         Padding(
           padding: const EdgeInsets.only(right: 16),
           child: IconButton(
+            // ✅ Badge dynamique réel
             icon: Stack(
+              clipBehavior: Clip.none,
               children: [
-                Icon(Icons.notifications_outlined, color: Colors.blue[700]),
-                Positioned(
-                  right: 0,
-                  top: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(2),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    constraints: const BoxConstraints(
-                      minWidth: 14,
-                      minHeight: 14,
-                    ),
-                    child: const Text(
-                      '2',
-                      style: TextStyle(color: Colors.white, fontSize: 8),
-                      textAlign: TextAlign.center,
+                Icon(Icons.notifications_outlined,
+                    color: Colors.blue[700]),
+                if (_notifNonLues > 0)
+                  Positioned(
+                    right: -4,
+                    top  : -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(
+                          minWidth: 16, minHeight: 16),
+                      child: Text(
+                        _notifNonLues > 99
+                            ? '99+'
+                            : '$_notifNonLues',
+                        style: const TextStyle(
+                            color     : Colors.white,
+                            fontSize  : 9,
+                            fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
-            onPressed: () {
-              ErrorHandler.showSuccess(context, "Notifications à venir");
-            },
+            // ✅ Ouvre la page notifications vétérinaire
+            onPressed: _ouvrirNotifications,
           ),
         ),
       ],
     );
   }
 
-  // ===== BOTTOM NAVIGATION BAR =====
+  // ===== BOTTOM NAV BAR avec badge sur Alertes =====
   Widget _buildBottomNavBar() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        color       : Colors.white,
+        borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(20)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.10),
+            color     : Colors.black.withOpacity(0.10),
             blurRadius: 20,
-            offset: const Offset(0, -4),
+            offset    : const Offset(0, -4),
           ),
         ],
       ),
       child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(20)),
         child: BottomNavigationBar(
-          currentIndex: _selectedIndex,
-          onTap: _onNavTap,
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.white,
-          selectedItemColor: Colors.blue[700],
+          currentIndex      : _selectedIndex,
+          onTap             : _onNavTap,
+          type              : BottomNavigationBarType.fixed,
+          backgroundColor   : Colors.white,
+          selectedItemColor : Colors.blue[700],
           unselectedItemColor: Colors.grey[400],
           selectedLabelStyle: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 11,
-          ),
-          unselectedLabelStyle: const TextStyle(
-            fontWeight: FontWeight.w400,
-            fontSize: 11,
-          ),
+              fontWeight: FontWeight.w700, fontSize: 11),
+          unselectedLabelStyle:
+              const TextStyle(fontWeight: FontWeight.w400, fontSize: 11),
           elevation: 0,
           items: [
             BottomNavigationBarItem(
-              icon: _navIcon(Icons.home_outlined, 0),
+              icon      : _navIcon(Icons.home_outlined, 0),
               activeIcon: _navIconActive(Icons.home_rounded, 0),
-              label: "Accueil",
+              label     : "Accueil",
             ),
             BottomNavigationBarItem(
-              icon: _navIcon(Icons.folder_outlined, 1),
+              icon      : _navIcon(Icons.folder_outlined, 1),
               activeIcon: _navIconActive(Icons.folder, 1),
-              label: "Fiches",
+              label     : "Fiches",
             ),
             BottomNavigationBarItem(
-              icon: _navIcon(Icons.vaccines_outlined, 2),
+              icon      : _navIcon(Icons.vaccines_outlined, 2),
               activeIcon: _navIconActive(Icons.vaccines, 2),
-              label: "Vaccins",
+              label     : "Vaccins",
             ),
             BottomNavigationBarItem(
-              icon: _navIcon(Icons.nfc_outlined, 3),
+              icon      : _navIcon(Icons.nfc_outlined, 3),
               activeIcon: _navIconActive(Icons.nfc, 3),
-              label: "Scan RFID",
+              label     : "Scan RFID",
             ),
           ],
         ),
@@ -433,28 +601,25 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
     );
   }
 
-  /// Icône inactive
   Widget _navIcon(IconData icon, int index) {
     return Padding(
       padding: const EdgeInsets.only(top: 4),
-      child: Icon(icon, size: 24),
+      child  : Icon(icon, size: 24),
     );
   }
 
-  /// Icône active avec fond coloré
   Widget _navIconActive(IconData icon, int index) {
     return Container(
-      margin: const EdgeInsets.only(top: 2, bottom: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      margin  : const EdgeInsets.only(top: 2, bottom: 2),
+      padding : const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.blue[700]!.withOpacity(0.12),
+        color       : Colors.blue[700]!.withOpacity(0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Icon(icon, size: 24, color: Colors.blue[700]),
     );
   }
 
-  // ===== LOADING =====
   Widget _buildLoadingState() {
     return Center(
       child: Column(
@@ -462,31 +627,28 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
         children: [
           CircularProgressIndicator(color: Colors.blue[700]),
           const SizedBox(height: 16),
-          Text(
-            "Chargement...",
-            style: TextStyle(color: Colors.blue[700], fontSize: 16),
-          ),
+          Text("Chargement...",
+              style: TextStyle(color: Colors.blue[700], fontSize: 16)),
         ],
       ),
     );
   }
 
-  // ===== WELCOME CARD =====
   Widget _buildWelcomeCard() {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [Colors.blue[700]!, Colors.blue[500]!],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          begin : Alignment.topLeft,
+          end   : Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.blue.withOpacity(0.3),
+            color     : Colors.blue.withOpacity(0.3),
             blurRadius: 8,
-            offset: const Offset(0, 4),
+            offset    : const Offset(0, 4),
           ),
         ],
       ),
@@ -499,35 +661,33 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
                 Text(
                   "Bonjour, Dr. $_userName! 👨‍⚕️",
                   style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
+                      color      : Colors.white,
+                      fontSize   : 22,
+                      fontWeight : FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   "Bienvenue sur votre espace médical",
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
-                    fontSize: 14,
-                  ),
+                      color  : Colors.white.withOpacity(0.9),
+                      fontSize: 14),
                 ),
               ],
             ),
           ),
-          Icon(Icons.medical_services, color: Colors.amber[300], size: 40),
+          Icon(Icons.medical_services,
+              color: Colors.amber[300], size: 40),
         ],
       ),
     );
   }
 
-  // ===== STATISTIQUES =====
   Widget _buildStatistiques() {
     return Row(
       children: [
         Expanded(
           child: _buildStatCard(
-            icon: Icons.pets,
+            icon : Icons.pets,
             label: "Total",
             value: "$_totalAnimaux",
             color: Colors.blue,
@@ -536,7 +696,7 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
         const SizedBox(width: 12),
         Expanded(
           child: _buildStatCard(
-            icon: Icons.medical_services,
+            icon : Icons.medical_services,
             label: "Consultations",
             value: "$_consultationsEnCours",
             color: Colors.green,
@@ -547,17 +707,17 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
   }
 
   Widget _buildStatCard({
-    required IconData icon,
-    required String label,
-    required String value,
+    required IconData     icon,
+    required String       label,
+    required String       value,
     required MaterialColor color,
   }) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          begin : Alignment.topLeft,
+          end   : Alignment.bottomRight,
           colors: [color[50]!, color[100]!],
         ),
         borderRadius: BorderRadius.circular(16),
@@ -568,50 +728,41 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
           Container(
             padding: const EdgeInsets.all(8),
             decoration: const BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
+                color: Colors.white, shape: BoxShape.circle),
             child: Icon(icon, size: 32, color: color[700]),
           ),
           const SizedBox(height: 12),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: color[900],
-            ),
-          ),
+          Text(value,
+              style: TextStyle(
+                  fontSize  : 28,
+                  fontWeight: FontWeight.bold,
+                  color     : color[900])),
           const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: color[700],
-            ),
-          ),
+          Text(label,
+              style: TextStyle(
+                  fontSize  : 13,
+                  fontWeight: FontWeight.w600,
+                  color     : color[700])),
         ],
       ),
     );
   }
 
-  // ===== SCAN CARD =====
   Widget _buildScanCard() {
     return Container(
       height: 200,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          begin : Alignment.topLeft,
+          end   : Alignment.bottomRight,
           colors: [Colors.blue[700]!, Colors.blue[500]!],
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.blue.withOpacity(0.4),
+            color     : Colors.blue.withOpacity(0.4),
             blurRadius: 12,
-            offset: const Offset(0, 6),
+            offset    : const Offset(0, 6),
           ),
         ],
       ),
@@ -620,57 +771,44 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
         child: Row(
           children: [
             Expanded(
-              flex: 3,
+              flex : 3,
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                mainAxisAlignment : MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        "Scan RFID Rapide",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 19,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      const Text("Scan RFID Rapide",
+                          style: TextStyle(
+                              color     : Colors.white,
+                              fontSize  : 19,
+                              fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
-                      Text(
-                        "Accédez aux dossiers médicaux",
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.9),
-                          fontSize: 14,
-                        ),
-                      ),
+                      Text("Accédez aux dossiers médicaux",
+                          style: TextStyle(
+                              color  : Colors.white.withOpacity(0.9),
+                              fontSize: 14)),
                     ],
                   ),
                   ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
                           builder: (context) =>
-                              const ScanRFIDVeterinaireBluetooth(),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.nfc, size: 20),
-                    label: const Text(
-                      "Scanner",
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                              const ScanRFIDVeterinaireBluetooth()),
                     ),
+                    icon : const Icon(Icons.nfc, size: 20),
+                    label: const Text("Scanner",
+                        style:
+                            TextStyle(fontWeight: FontWeight.bold)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: Colors.blue[700],
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 15,
-                      ),
+                          horizontal: 20, vertical: 15),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(30),
-                      ),
+                          borderRadius: BorderRadius.circular(30)),
                     ),
                   ),
                 ],
@@ -678,14 +816,14 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
             ),
             const SizedBox(width: 12),
             Flexible(
-              flex: 1,
+              flex : 1,
               child: Image.asset(
                 "assets/image/img14.png",
-                width: 100,
-                fit: BoxFit.contain,
+                width      : 100,
+                fit        : BoxFit.contain,
                 errorBuilder: (_, __, ___) => Icon(
                   Icons.medical_services,
-                  size: 100,
+                  size : 100,
                   color: Colors.white.withOpacity(0.5),
                 ),
               ),
@@ -696,20 +834,17 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
     );
   }
 
-  // ===== SECTION HEADER =====
   Widget _buildSectionHeader() {
     return const Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          'Gestion médicale',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
+        Text('Gestion médicale',
+            style:
+                TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
       ],
     );
   }
 
-  // ===== OPTIONS GRID =====
   Widget _buildOptionsGrid() {
     return Column(
       children: [
@@ -717,18 +852,18 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
           children: [
             Expanded(
               child: optioncardVeterinaire(
-                image: 'assets/image/img10.png',
-                label: "Fiches de Santé",
-                route: const FichesSante(),
+                image          : 'assets/image/img10.png',
+                label          : "Fiches de Santé",
+                route          : const FichesSante(),
                 backgroundColor: const Color(0xFFE8F5E9),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: optioncardVeterinaire(
-                image: 'assets/image/img6.png',
-                label: 'Historique Médical',
-                route: const HistoriqueMedical(),
+                image          : 'assets/image/img6.png',
+                label          : 'Historique Médical',
+                route          : const HistoriqueMedical(),
                 backgroundColor: const Color(0xFFFFF3E0),
               ),
             ),
@@ -739,18 +874,18 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
           children: [
             Expanded(
               child: optioncardVeterinaire(
-                image: 'assets/image/img5.png',
-                label: "Vaccinations",
-                route: const Vaccinations(),
+                image          : 'assets/image/img5.png',
+                label          : "Vaccinations",
+                route          : const Vaccinations(),
                 backgroundColor: const Color(0xFFFCE4EC),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: optioncardVeterinaire(
-                image: 'assets/image/img14.png',
-                label: 'Scan RFID',
-                route: const ScanRFIDVeterinaireBluetooth(),
+                image          : 'assets/image/img14.png',
+                label          : 'Scan RFID',
+                route          : const ScanRFIDVeterinaireBluetooth(),
                 backgroundColor: const Color(0xFFFFF9C4),
               ),
             ),
@@ -760,7 +895,6 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
     );
   }
 
-  // ===== DRAWER =====
   Widget _buildDrawer() {
     return Drawer(
       child: ListView(
@@ -776,7 +910,7 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const CircleAvatar(
-                  radius: 30,
+                  radius         : 30,
                   backgroundColor: Colors.white,
                   child: Icon(Icons.medical_services,
                       size: 40, color: Colors.blue),
@@ -785,14 +919,14 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
                 Text(
                   "Dr. $_userName",
                   style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                      color     : Colors.white,
+                      fontSize  : 18,
+                      fontWeight: FontWeight.bold),
                 ),
                 Text(
                   _userEmail,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  style: const TextStyle(
+                      color: Colors.white70, fontSize: 12),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
@@ -800,20 +934,129 @@ class _interfaceVeterinaireState extends State<interfaceVeterinaire>
           ),
           ListTile(
             leading: const Icon(Icons.refresh),
-            title: const Text("Actualiser"),
-            onTap: () {
+            title  : const Text("Actualiser"),
+            onTap  : () {
               Navigator.pop(context);
               _handleRefresh();
             },
           ),
           const Divider(),
+          // ✅ Messagerie dans le Drawer
+          ListTile(
+            leading: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.chat_bubble_outline, color: Colors.green[700]),
+                if (_messagesNonLus > 0)
+                  Positioned(
+                    right: -4,
+                    top  : -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                          color: Colors.red, shape: BoxShape.circle),
+                      child: Text('$_messagesNonLus',
+                          style: const TextStyle(
+                              color     : Colors.white,
+                              fontSize  : 8,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+              ],
+            ),
+            title: Row(
+              children: [
+                const Text('Messagerie'),
+                if (_messagesNonLus > 0) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color       : Colors.red,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text('$_messagesNonLus',
+                        style: const TextStyle(
+                            color     : Colors.white,
+                            fontSize  : 11,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ],
+            ),
+            subtitle: _messagesNonLus > 0
+                ? Text('$_messagesNonLus message${_messagesNonLus > 1 ? "s" : ""} non lu${_messagesNonLus > 1 ? "s" : ""}',
+                    style: const TextStyle(color: Colors.red, fontSize: 12))
+                : const Text('Conversations avec les éleveurs'),
+            onTap: () {
+              Navigator.pop(context);
+              _ouvrirMessagerie();
+            },
+          ),
+          const Divider(),
+          // ✅ NOUVEAU — Notifications dans le Drawer
+          ListTile(
+            leading: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(Icons.notifications_outlined,
+                    color: Colors.blue[700]),
+                if (_notifNonLues > 0)
+                  Positioned(
+                    right: -4,
+                    top  : -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                          color: Colors.red, shape: BoxShape.circle),
+                      child: Text('$_notifNonLues',
+                          style: const TextStyle(
+                              color    : Colors.white,
+                              fontSize : 8,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+              ],
+            ),
+            title: Row(
+              children: [
+                const Text('Notifications'),
+                if (_notifNonLues > 0) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color       : Colors.red,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text('$_notifNonLues',
+                        style: const TextStyle(
+                            color    : Colors.white,
+                            fontSize : 11,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ],
+            ),
+            subtitle: _notifNonLues > 0
+                ? Text(
+                    '$_notifNonLues non lue${_notifNonLues > 1 ? 's' : ''}',
+                    style: const TextStyle(
+                        color: Colors.red, fontSize: 12))
+                : const Text('Aucune nouvelle notification'),
+            onTap: () {
+              Navigator.pop(context);
+              _ouvrirNotifications();
+            },
+          ),
+          const Divider(),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.red),
-            title: const Text(
-              "Déconnexion",
-              style: TextStyle(color: Colors.red),
-            ),
-            onTap: _handleLogout,
+            title  : const Text("Déconnexion",
+                style: TextStyle(color: Colors.red)),
+            onTap  : _handleLogout,
           ),
         ],
       ),

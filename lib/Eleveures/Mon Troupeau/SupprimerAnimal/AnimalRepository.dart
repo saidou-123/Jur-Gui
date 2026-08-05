@@ -56,6 +56,15 @@ class AnimalRepository {
     required AnimalStatut statut,
     String? transfertVersUserId,
   }) async {
+    final userId = _currentUserId;
+    if (userId == null) throw Exception("Utilisateur non connecté");
+
+    // 🔒 Sécurité : on vérifie explicitement que l'animal appartient
+    // à l'utilisateur connecté, en plus de la RLS côté Supabase.
+    if (animal.userId != userId) {
+      throw Exception("Action non autorisée sur cet animal");
+    }
+
     final updateData = {
       'statut': statut.dbValue,
       'motif_suppression': statut.label,
@@ -67,7 +76,8 @@ class AnimalRepository {
     await _client
         .from(animal.tableSource)
         .update(updateData)
-        .eq('id', animal.id);
+        .eq('id', animal.id)
+        .eq('user_id', userId); // 🔒 double filtre défensif
 
     // Insérer dans l'historique
     await _insertHistorique(animal: animal, statut: statut);
@@ -114,20 +124,72 @@ class AnimalRepository {
       'tue': 0,
     };
 
+    // Une seule requête "count" par table (pas de téléchargement de lignes),
+    // puis on répartit côté client au lieu de faire 4 requêtes par table.
+    // ⚙️ Encore mieux si possible : créer une vue SQL / fonction RPC
+    // Postgres qui renvoie directement les 4 compteurs en un seul appel.
     for (final table in ['nouveaux_nee', 'animal_acheter']) {
-      for (final statut in ['actif', 'mort', 'vendu', 'tue']) {
-        try {
-          final response = await _client
-              .from(table)
-              .select('id')
-              .eq('user_id', userId)
-              .eq('statut', statut);
-          stats[statut] = (stats[statut] ?? 0) + (response as List).length;
-        } catch (_) {}
+      try {
+        final rows = await _client
+            .from(table)
+            .select('statut')
+            .eq('user_id', userId);
+
+        for (final row in rows as List) {
+          final statut = (row['statut'] as String?) ?? 'actif';
+          if (stats.containsKey(statut)) {
+            stats[statut] = (stats[statut] ?? 0) + 1;
+          }
+        }
+      } catch (e) {
+        debugPrint("⚠️ Erreur statistiques ($table): $e");
       }
     }
 
     return stats;
+  }
+
+  // ----------------------------------------------------------
+  // 🔄 FINALISER UN TRANSFERT (accepter ou refuser)
+  // ----------------------------------------------------------
+  Future<void> repondreTransfert({
+    required AnimalModel animal,
+    required bool accepter,
+  }) async {
+    final userId = _currentUserId;
+    if (userId == null) throw Exception("Utilisateur non connecté");
+
+    if (animal.transfertVersUserId != userId) {
+      // Seul le destinataire du transfert peut répondre.
+      throw Exception("Ce transfert ne vous est pas destiné");
+    }
+
+    if (accepter) {
+      await _client.from(animal.tableSource).update({
+        'statut': AnimalStatut.actif.dbValue,
+        'user_id': userId, // l'animal change bien de propriétaire
+        'deleted_at': null,
+        'motif_suppression': null,
+        'transfert_vers_user_id': null,
+      }).eq('id', animal.id);
+    } else {
+      await _client.from(animal.tableSource).update({
+        'statut': AnimalStatut.actif.dbValue,
+        'deleted_at': null,
+        'motif_suppression': null,
+        'transfert_vers_user_id': null,
+      }).eq('id', animal.id).eq('user_id', animal.userId);
+    }
+
+    await _client.from('animal_historique').insert({
+      'animal_id': animal.id,
+      'animal_nom': animal.nom,
+      'animal_race': animal.race,
+      'table_source': animal.tableSource,
+      'owner_id': animal.userId,
+      'action': accepter ? 'transfert_accepte' : 'transfert_refuse',
+      'created_at': DateTime.now().toIso8601String(),
+    });
   }
 
   // ----------------------------------------------------------
@@ -140,9 +202,10 @@ class AnimalRepository {
     final emailNormalise = email.trim().toLowerCase();
 
     try {
-      // ilike = insensible à la casse côté Supabase
-      // Pas de filtre dur sur 'role' (évite bugs casse/accent)
-      // On exclut l'utilisateur connecté lui-même
+      // ⚠️ Idéalement, remplacer cet appel par un RPC Supabase
+      // (ex: `find_eleveur_by_email`) qui filtre le rôle CÔTÉ SERVEUR
+      // avec `security definer`, pour ne jamais exposer toute la table
+      // 'users' aux clients et ne pas dépendre d'un filtre client.
       final results = await _client
           .from('users')
           .select('id, email, nom, prenom, nom_complet, role')
@@ -154,15 +217,18 @@ class AnimalRepository {
       final user = Map<String, dynamic>.from(results.first);
 
       // Vérification côté client : accepte 'Eleveur', 'eleveur', 'Éleveur'
+      // ⚠️ Ce contrôle est un filtre d'affichage, pas une garantie de
+      // sécurité : la vraie vérification doit vivre dans une policy RLS
+      // ou un RPC serveur (voir softDeleteAnimal / commentaire ci-dessus).
       final role = (user['role'] ?? '').toString().toLowerCase();
       if (!role.contains('leveur')) {
-        debugPrint("⚠️ Rôle non éleveur : \$role");
+        debugPrint("⚠️ Rôle non éleveur : $role");
         return null;
       }
 
       return user;
     } catch (e) {
-      debugPrint("❌ Erreur recherche éleveur: \$e");
+      debugPrint("❌ Erreur recherche éleveur: $e");
       return null;
     }
   }

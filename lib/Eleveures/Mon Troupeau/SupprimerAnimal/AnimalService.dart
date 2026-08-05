@@ -43,6 +43,16 @@ class AnimalService {
   }
 
   // ----------------------------------------------------------
+  // 🔄 Répondre à une demande de transfert
+  // ----------------------------------------------------------
+  Future<void> repondreTransfert({
+    required AnimalModel animal,
+    required bool accepter,
+  }) {
+    return _repository.repondreTransfert(animal: animal, accepter: accepter);
+  }
+
+  // ----------------------------------------------------------
   // 📊 Statistiques pour tableau de bord
   // ----------------------------------------------------------
   Future<Map<String, int>> getStatistiques() {
@@ -55,6 +65,4 @@ class AnimalService {
   Future<Map<String, dynamic>?> rechercherEleveur(String email) {
     return _repository.findEleveurByEmail(email);
   }
-
-  Future chargerTousLesAnimaux() async {}
 }

@@ -68,7 +68,7 @@ class AnimalModel {
   final String tableSource; // 'nouveaux_nee' ou 'animal_acheter'
   final AnimalStatut statut;
   final String? motifSuppression;
-  final String? deletedAt;
+  final DateTime? deletedAt;
   final String? transfertVersUserId;
   final DateTime? createdAt;
 
@@ -91,23 +91,29 @@ class AnimalModel {
   });
 
   factory AnimalModel.fromMap(Map<String, dynamic> map, String tableSource) {
+    // Cast défensif : si une colonne a un type inattendu, on ne fait pas
+    // planter tout l'écran, on retombe sur une valeur nulle/vide.
+    String? asString(dynamic v) => v?.toString();
+
     return AnimalModel(
       id: map['id']?.toString() ?? '',
-      nom: map['nom'],
-      race: map['race'],
-      sexe: map['sexe'],
-      imageUrl: map['image_url'],
-      tagRfid: map['tag_rfid'],
-      dateNaissance: map['date_naissance'],
-      provenance: map['provenance'],
-      userId: map['user_id'] ?? '',
+      nom: asString(map['nom']),
+      race: asString(map['race']),
+      sexe: asString(map['sexe']),
+      imageUrl: asString(map['image_url']),
+      tagRfid: asString(map['tag_rfid']),
+      dateNaissance: asString(map['date_naissance']),
+      provenance: asString(map['provenance']),
+      userId: map['user_id']?.toString() ?? '',
       tableSource: tableSource,
-      statut: AnimalStatut.fromString(map['statut']),
-      motifSuppression: map['motif_suppression'],
-      deletedAt: map['deleted_at'],
-      transfertVersUserId: map['transfert_vers_user_id'],
+      statut: AnimalStatut.fromString(asString(map['statut'])),
+      motifSuppression: asString(map['motif_suppression']),
+      deletedAt: map['deleted_at'] != null
+          ? DateTime.tryParse(map['deleted_at'].toString())
+          : null,
+      transfertVersUserId: asString(map['transfert_vers_user_id']),
       createdAt: map['created_at'] != null
-          ? DateTime.tryParse(map['created_at'])
+          ? DateTime.tryParse(map['created_at'].toString())
           : null,
     );
   }

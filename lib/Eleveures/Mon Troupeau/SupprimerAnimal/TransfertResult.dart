@@ -100,7 +100,16 @@ class _TransfertDialogState extends State<_TransfertDialog> {
     final full = '$prenom $nom'.trim();
     if (full.isNotEmpty) return full;
 
-    return (e['email'] ?? 'Éleveur').toString();
+    final email = (e['email'] ?? '').toString().trim();
+    if (email.isNotEmpty) return email;
+
+    return 'Éleveur';
+  }
+
+  /// Initiale sûre pour l'avatar : ne plante jamais sur une chaîne vide.
+  String _getInitiale(Map<String, dynamic> e) {
+    final nom = _getNomEleveur(e);
+    return nom.isNotEmpty ? nom.substring(0, 1).toUpperCase() : '?';
   }
 
   // ----------------------------------------------------------
@@ -196,9 +205,7 @@ class _TransfertDialogState extends State<_TransfertDialog> {
                       radius: 22,
                       backgroundColor: Colors.green.shade200,
                       child: Text(
-                        _getNomEleveur(_eleveurTrouve!)
-                            .substring(0, 1)
-                            .toUpperCase(),
+                        _getInitiale(_eleveurTrouve!),
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.green[900],

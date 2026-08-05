@@ -1,5 +1,5 @@
 // ============================================================
-// SERVICE IA CONSANGUINITÉ — v2 (Pedigree Automatique)
+// SERVICE CONSANGUINITÉ — v5 (Wright seul décisionnel)
 // Fichier: lib/Eleveures/New/Accouplemt/ConsanguiniteService.dart
 // ============================================================
 
@@ -7,57 +7,75 @@ import 'dart:convert';
 import 'package:depart/Eleveures/New/Accouplemt/ResultatConsanguinite.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ConsanguiniteService {
- static const String _baseUrl = 'https://web-production-9298.up.railway.app';
-  final supabase = Supabase.instance.client;
+  // URL de l'API déployée sur Render
+  static const String _baseUrl = 'https://api-consanguinite.onrender.com';
 
+  // ----------------------------------------------------------
+  // MÉTHODE PRINCIPALE
+  // ----------------------------------------------------------
   Future<ResultatConsanguinite> analyserCouple({
     required Map<String, dynamic> brebis,
     required Map<String, dynamic> belier,
   }) async {
     try {
+      // 1. Vérifier disponibilité du serveur
       final actif = await _verifierServeur();
       if (!actif) {
         return ResultatConsanguinite.erreur(
-          'Serveur IA non disponible.\n.',
+          'Serveur IA non disponible.\n'
+          'Vérifiez votre connexion Internet.',
         );
       }
+
+      // 2. Construire la requête
       final corps = {
         'brebis_id'    : brebis['id'],
         'source_brebis': brebis['source'] ?? 'achete',
         'belier_id'    : belier['id'],
         'source_belier': belier['source'] ?? 'achete',
       };
-      debugPrint('🤖 Analyse: ${brebis['nom']} × ${belier['nom']}');
+
+      debugPrint('🧬 Wright: ${brebis['nom']} × ${belier['nom']}');
+
+      // 3. Appel HTTP POST
       final reponse = await http
           .post(
             Uri.parse('$_baseUrl/analyser-pedigree'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode(corps),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 45));
+
       if (reponse.statusCode == 200) {
         final json = jsonDecode(reponse.body) as Map<String, dynamic>;
         final r = ResultatConsanguinite.fromJson(json);
-        debugPrint('✅ F=${r.fPourcent}% | ${r.relation} | ${r.resultat}');
+        debugPrint('✅ F=${r.fFormate} | ${r.relation} | ${r.resultat} | ${r.methode}');
         return r;
       }
-      return ResultatConsanguinite.erreur('Erreur serveur: ${reponse.statusCode}');
-    } on Exception catch (e) {
-      debugPrint('❌ $e');
+
+      debugPrint('❌ HTTP ${reponse.statusCode}: ${reponse.body}');
       return ResultatConsanguinite.erreur(
-        'Impossible de contacter le serveur IA.\nVérifiez votre connexion Wi-Fi.',
+          'Erreur serveur: ${reponse.statusCode}');
+
+    } on Exception catch (e) {
+      debugPrint('❌ ConsanguiniteService: $e');
+      return ResultatConsanguinite.erreur(
+        'Impossible de contacter le serveur.\n'
+        'Vérifiez votre connexion Wi-Fi.',
       );
     }
   }
 
+  // ----------------------------------------------------------
+  // HEALTHCHECK
+  // ----------------------------------------------------------
   Future<bool> _verifierServeur() async {
     try {
       final r = await http
           .get(Uri.parse('$_baseUrl/sante'))
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 15));
       return r.statusCode == 200;
     } catch (_) {
       return false;

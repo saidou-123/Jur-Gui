@@ -1,44 +1,58 @@
-import 'package:depart/pages/Bienvenue/connexion.dart';
 import 'package:depart/widgets/couleur.dart';
 import 'package:flutter/material.dart';
-import 'dart:async';
 
-class Welcomepage2  extends StatelessWidget {
-  const Welcomepage2 ({super.key});
+class Welcomepage2 extends StatelessWidget {
+  const Welcomepage2({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-        padding: EdgeInsets.symmetric(horizontal: 10),
-        child: Column(
-          children: [
-            Container(
-              child: Column(
-                children: [
-                  Image.asset( 'assets/image/img16.png'),
-                  SizedBox(height: 24,),
-            
-                  Text("Elevge inteligente",
-                  textAlign:TextAlign.center ,
-                  style: TextStyle(color: Couleur.PremierColor, fontSize: 28, fontWeight: FontWeight.bold),),
-                  SizedBox(height: 18,),
-      
-                  Text("avoir les information a temps reel de vos animaux pour une intervantion rappide",
-                  textAlign:TextAlign.center ,
-                  style: TextStyle(
-                    
-                  ), ),
-      
-      
-      
-      
-                    
-                    
-                ],
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Column(
+        children: [
+          const SizedBox(height: 50),
+          Column(
+            children: [
+                Text(
+                          "JUR GUI",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 40,
+                            color: Couleur.PremierColor,
+                            letterSpacing: 2,
+                          ),
+                        ),
+
+                        // Sous-titre
+                        Text(
+                          "Gestion d'Élevage Intelligente",
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: Couleur.PremierColor,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                  const SizedBox(height:8),
+              Image.asset('assets/image/img16.png'),
+              const SizedBox(height: 24),
+              Text(
+                "Suivi de la santé",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Couleur.PremierColor,
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            )
-          ],
-        ),
-      ) ;
+              const Text(
+                "Recevez des alertes automatiques sur les cycles, la santé et les besoins de vos animaux",
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Colors.black87),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
