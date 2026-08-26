@@ -34,6 +34,9 @@ class ReproductionConfig {
   // ===== LACTATION =====
   static const int dureeLactationJours = 90;
   static const int periodeSevrageJours = 30;
+
+  // Délai estimé avant retour en chaleur après le sevrage
+  static const int retourChaleurPostSevrageJours = 21;
  
   // ===== RAPPELS ET NOTIFICATIONS =====
   static const int rappelAvantChaleurJours      = 2;
@@ -103,4 +106,3 @@ class ReproductionConfig {
   static const int colorDanger    = 0xFFF44336; // Red
   static const int colorInfo      = 0xFF2196F3; // Blue
 }
- 

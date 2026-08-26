@@ -13,6 +13,7 @@
 //   ReproductionConfig.dureeLactationJours    = 90  (3 mois)
 //   ReproductionConfig.periodeSevrageJours    = 30  (fenêtre 3→4 mois)
 //   ReproductionConfig.ageMinimumReproductionMois = 8
+//   ReproductionConfig.retourChaleurPostSevrageJours = 21 (~3 semaines)
 // ============================================================
  
 import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
@@ -94,7 +95,7 @@ class SevrageService {
       //    → et planifier une notification de retour en chaleur
  
       final dateRetourChaleur = DateTime.now().add(
-        const Duration(days: 21), // ~3 semaines post-sevrage pour retour chaleur
+        const Duration(days: ReproductionConfig.retourChaleurPostSevrageJours),
       );
  
       await _notif.afficherNotificationImmediateLocal(
@@ -312,4 +313,3 @@ class PerformancesGenetiques {
     return const Color(0xFFE53935);
   }
 }
- 
