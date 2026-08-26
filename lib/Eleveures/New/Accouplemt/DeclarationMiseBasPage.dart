@@ -116,7 +116,6 @@ class _DeclarationMiseBasPageState extends State<DeclarationMiseBasPage> {
     setState(() => _isLoading = true);
  
     try {
-      final userId = _supabase.auth.currentUser!.id;
       final accouplementId = widget.accouplement['id']?.toString();
  
       // Date complète mise bas
@@ -128,70 +127,43 @@ class _DeclarationMiseBasPageState extends State<DeclarationMiseBasPage> {
         _heureMiseBas.minute,
       );
  
-      // ── ÉTAPE 1 : Mettre à jour l'accouplement ────────────
-      await _supabase.from('accouplements').update({
-        'date_mise_bas'    : dateMiseBas.toIso8601String(),
-        'nombre_agneaux'   : _nombreAgneaux,
-        'notes_mise_bas'   : _notesCtrl.text.trim().isEmpty
-            ? null
-            : _notesCtrl.text.trim(),
-        'statut_gestation' : 'gestation_confirmee',
-      }).eq('id', accouplementId!);
- 
-      debugPrint('✅ Accouplement mis à jour: mise bas enregistrée');
- 
-      // ── ÉTAPE 2 : Insérer chaque agneau ───────────────────
-      final List<String> idsAgneaux = [];
- 
-      for (int i = 0; i < _agneaux.length; i++) {
-        final agneau = _agneaux[i];
+      // ── ÉTAPE 1+2 : Enregistrement atomique (accouplement + tous
+      //    les agneaux + leur ajout au troupeau) via une fonction
+      //    Supabase (RPC). Soit tout est enregistré, soit rien ne
+      //    l'est : plus de risque de mise bas "à moitié" enregistrée
+      //    en cas de coupure réseau en cours de route.
+      final agneauxData = _agneaux.asMap().entries.map((entry) {
+        final i = entry.key;
+        final agneau = entry.value;
         final nomAgneau = agneau.nomCtrl.text.trim().isEmpty
             ? '${_nomBrebis()} - Agneau ${i + 1}'
             : agneau.nomCtrl.text.trim();
- 
-        // ── Insert dans la table agneaux (suivi détaillé) ──
-        final insertAgneau = await _supabase.from('agneaux').insert({
-          'accouplement_id' : accouplementId,
-          'user_id'         : userId,
+
+        return {
           'nom'             : nomAgneau,
           'sexe'            : agneau.sexe!,
-          'poids_naissance' : agneau.poidsCtrl.text.trim().isEmpty
-              ? null
-              : double.tryParse(agneau.poidsCtrl.text.trim()),
+          'poids_naissance' : agneau.poidsCtrl.text.trim(),
           'pere_id'         : widget.accouplement['belier_id']?.toString(),
           'source_pere'     : widget.accouplement['source_belier'],
           'mere_id'         : widget.brebis['id']?.toString(),
           'source_mere'     : widget.brebis['source'],
           'race'            : widget.brebis['race'],
-          'observations'    : agneau.obsCtrl.text.trim().isEmpty
-              ? null
-              : agneau.obsCtrl.text.trim(),
+          'observations'    : agneau.obsCtrl.text.trim(),
           'etat_naissance'  : agneau.etat,
-          'date_naissance'  : dateMiseBas.toIso8601String(),
-          'created_at'      : DateTime.now().toIso8601String(),
-        }).select('id').single();
- 
-        idsAgneaux.add(insertAgneau['id'].toString());
- 
-        // ── Insert dans nouveaux_nee (animal dans le troupeau) ──
-        // Seulement si l'état est 'vivant' ou 'faible'
-        if (agneau.etat != 'mort_ne') {
-          await _supabase.from('nouveaux_nee').insert({
-            'nom'          : nomAgneau,
-            'race'         : widget.brebis['race'],
-            'date_naissance': dateMiseBas.toIso8601String().substring(0, 10),
-            'sexe'         : agneau.sexe!,
-            'user_id'      : userId,
-            'created_at'   : DateTime.now().toIso8601String(),
-            // ── Généalogie automatique ──────────────────────
-            'pere_id'      : widget.accouplement['belier_id']?.toString(),
-            'source_pere'  : widget.accouplement['source_belier'],
-            'mere_id'      : widget.brebis['id']?.toString(),
-            'source_mere'  : widget.brebis['source'],
-          });
-          debugPrint('✅ Agneau $nomAgneau ajouté au troupeau (nouveaux_nee)');
-        }
-      }
+        };
+      }).toList();
+
+      final result = await _supabase.rpc('enregistrer_mise_bas', params: {
+        'p_accouplement_id' : int.parse(accouplementId!),
+        'p_date_mise_bas'   : dateMiseBas.toIso8601String(),
+        'p_nombre_agneaux'  : _nombreAgneaux,
+        'p_notes_mise_bas'  : _notesCtrl.text.trim().isEmpty
+            ? null
+            : _notesCtrl.text.trim(),
+        'p_agneaux'         : agneauxData,
+      });
+
+      debugPrint('✅ Mise bas enregistrée en un bloc (RPC): $result');
  
       // ── ÉTAPE 3 : Annuler les rappels agnelage ────────────
       await _notif.annulerRappelsBrebis(
@@ -1021,5 +993,4 @@ class _AgneauFormData {
     poidsCtrl.dispose();
     obsCtrl.dispose();
   }
-}
- 
+ }
