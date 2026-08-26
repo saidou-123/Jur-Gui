@@ -196,23 +196,13 @@ class ReproductionBusinessService {
         }
       }
 
-      if (sourceBrebis == sourceBelier) {
-        final consanguinite = await _verifierConsanguinite(
-          brebisId,
-          belierId,
-          sourceBrebis,
-        );
-
-        if (consanguinite.isConsanguin) {
-          return ValidationResult(
-            isValid: true,
-            message:
-                '⚠️ Attention: ${consanguinite.degre} détecté. Risque de consanguinité.',
-            code: 'CONSANGUINITE',
-            severity: 'warning',
-          );
-        }
-      }
+      // ℹ️ La détection de consanguinité n'est PAS faite ici.
+      // Choix du projet : c'est le service externe ConsanguiniteService
+      // (API de pedigree) qui est la seule source de vérité pour la
+      // consanguinité, via le bouton "Analyser" dans l'écran Accouplement.
+      // Ce bouton est rendu obligatoire avant l'enregistrement (voir
+      // Accouplement..dart), ce qui garantit que l'analyse est bien
+      // faite à chaque fois, sans dupliquer la logique ici.
 
       return ValidationResult(isValid: true, message: 'OK');
     } catch (e) {
@@ -408,9 +398,12 @@ class ReproductionBusinessService {
     final intervalleJours =
         nouvelleChaleur.difference(dateDerniere).inDays;
 
+    // ✅ CORRECTION (même bug que la consanguinité) : isValid doit être
+    // `false` pour que l'appelant (peutEnregistrerChaleur) transmette
+    // bien cet avertissement au lieu de le considérer comme "OK".
     if (intervalleJours < ReproductionConfig.cycleMinJours) {
       return ValidationResult(
-        isValid: true,
+        isValid: false,
         message: ReproductionConfig.messageIntervalleCourtChaleur,
         code: 'INTERVALLE_COURT',
         severity: 'warning',
@@ -420,7 +413,7 @@ class ReproductionBusinessService {
 
     if (intervalleJours > ReproductionConfig.cycleMaxJours) {
       return ValidationResult(
-        isValid: true,
+        isValid: false,
         message: ReproductionConfig.messageIntervalleLongChaleur,
         code: 'INTERVALLE_LONG',
         severity: 'warning',
@@ -454,51 +447,12 @@ class ReproductionBusinessService {
     return chaleur != null;
   }
 
-  Future<ConsanguiniteResult> _verifierConsanguinite(
-    dynamic brebisId,
-    dynamic belierId,
-    String source,
-  ) async {
-    if (source == 'nee') {
-      try {
-        final brebis = await supabase
-            .from('nouveaux_nee')
-            .select('mere_id, pere_id')
-            .eq('id', brebisId)
-            .maybeSingle();
-
-        final belier = await supabase
-            .from('nouveaux_nee')
-            .select('mere_id, pere_id')
-            .eq('id', belierId)
-            .maybeSingle();
-
-        if (brebis == null || belier == null) {
-          return ConsanguiniteResult(isConsanguin: false);
-        }
-
-        if (brebis['mere_id'] != null &&
-            brebis['mere_id'] == belier['mere_id']) {
-          return ConsanguiniteResult(
-            isConsanguin: true,
-            degre: 'Frère et sœur',
-          );
-        }
-
-        if (brebis['pere_id'] == belierId ||
-            brebis['mere_id'] == belierId) {
-          return ConsanguiniteResult(
-            isConsanguin: true,
-            degre: 'Parent-enfant',
-          );
-        }
-      } catch (e) {
-        debugPrint('⚠️ Erreur vérification consanguinité: $e');
-      }
-    }
-
-    return ConsanguiniteResult(isConsanguin: false);
-  }
+  // ℹ️ La fonction _verifierConsanguinite (basée sur risque_consanguinite,
+  // la fonction SQL interne) a été retirée ici : ce projet utilise
+  // exclusivement le service externe ConsanguiniteService pour la
+  // détection de consanguinité (choix du projet). La fonction SQL
+  // reste disponible côté base pour un usage futur éventuel, mais
+  // n'est plus appelée depuis l'application.
 
   // ============================================================
   // ✅ CORRECTION BUG ÉTAPE 3 — Écart-type
@@ -594,16 +548,6 @@ class PredictionChaleur {
     required this.cycleIrregulier,
     required this.estAnoestrus,
     required this.enLactation,
-  });
-}
-
-class ConsanguiniteResult {
-  final bool isConsanguin;
-  final String? degre;
-
-  ConsanguiniteResult({
-    required this.isConsanguin,
-    this.degre,
   });
 }
 
