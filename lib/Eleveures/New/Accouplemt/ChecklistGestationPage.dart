@@ -410,8 +410,12 @@ class _ChecklistGestationPageState extends State<ChecklistGestationPage> {
             children: [
               Icon(icone, color: couleur, size: 22),
               const SizedBox(width: 10),
-              const Text('Probabilité de gestation',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              const Flexible(
+                child: Text('Probabilité de gestation',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(width: 8),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(

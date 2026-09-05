@@ -3,6 +3,7 @@
 // Chemin : lib/Eleveures/New/Copilot/CopilotService.dart
 // ============================================================
 
+import 'package:depart/Eleveures/New/Reproduction/ReproductionConfig.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -102,7 +103,9 @@ class CopilotContextBuilder {
         final gestante   = _estGestante(accouplements, id, src);
         final enChaleur  = _enChaleurRecente(chaleurs, id, src, now);
         final dernChdr   = _derniereChaleur(chaleurs, id, src);
-        final prochChdr  = dernChdr?.add(const Duration(days: 17));
+        final prochChdr  = dernChdr?.add(
+          const Duration(days: ReproductionConfig.cycleMoyenJours),
+        );
         final nbAcc      = _nbAccouplements(accouplements, id, src);
         final nbAgn      = _nbAgnelages(accouplements, id, src);
         final taux       = _tauxFertilite(accouplements, id, src);

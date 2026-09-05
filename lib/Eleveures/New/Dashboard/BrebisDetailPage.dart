@@ -8,6 +8,7 @@ import 'package:depart/Eleveures/New/Accouplemt/ChecklistGestationPage.dart';
 import 'package:depart/Eleveures/New/Accouplemt/DeclarationMiseBasPage.dart';
 import 'package:depart/Eleveures/New/Accouplemt/PreparationMiseBasPage.dart';
 import 'package:depart/Eleveures/New/Accouplemt/SuiviGestationService.dart';
+import 'package:depart/Eleveures/New/Reproduction/ReproductionConfig.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -158,9 +159,9 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
         _prochaineeChaleurEstimee =
             _derniereChaleur!.add(Duration(days: _cycleMoyenJours));
       } else {
-        _cycleMoyenJours = 17; // valeur par défaut
-        _prochaineeChaleurEstimee =
-            _derniereChaleur!.add(const Duration(days: 17));
+        _cycleMoyenJours = ReproductionConfig.cycleMoyenJours; // valeur par défaut
+        _prochaineeChaleurEstimee = _derniereChaleur!
+            .add(const Duration(days: ReproductionConfig.cycleMoyenJours));
       }
     }
   }
@@ -201,6 +202,7 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
       // Chercher date agnelage prévu
       final gestationCourante =
           _accouplements.firstWhere((a) => a['date_mise_bas'] == null);
+      _gestationCourante = gestationCourante; // ★ CORRECTIF : oubli d'assignation
       if (gestationCourante['date_prevue_agnelage'] != null) {
         _dateAgnelagePrevu =
             DateTime.parse(gestationCourante['date_prevue_agnelage']);

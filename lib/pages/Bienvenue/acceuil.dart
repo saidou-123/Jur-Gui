@@ -5,9 +5,15 @@
 // Fichier: lib/pages/acceuil.dart
 // ============================================================
 
+import 'package:depart/main.dart' show supabasePret;
 import 'package:depart/pages/Bienvenue/descriptionPages/homePage.dart';
+import 'package:depart/pages/Interface/interfaceEleveur/interfaceElevaur.dart';
+import 'package:depart/pages/Interface/interfaceVeterinaire/interfaceVeterinaire.dart';
+import 'package:depart/pages/Interface/VetPendingPage.dart';
+import 'package:depart/pages/Interface/VetRejectedPage.dart';
 import 'package:depart/widgets/couleur.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 
 class Acceuil extends StatefulWidget {
@@ -24,12 +30,67 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
   late Animation<double> _scaleAnimation;
 
   Timer? _autoNavigateTimer;
+  bool _navigationDejaEffectuee = false;
 
   @override
   void initState() {
     super.initState();
     _initAnimations();
     _startAutoNavigate();
+    // ★ Vérifie si une session existe déjà (utilisateur déjà connecté),
+    //   pour éviter de le renvoyer vers l'onboarding/connexion à chaque
+    //   démarrage à froid — notamment quand l'app est ouverte depuis
+    //   une notification.
+    _verifierSessionExistante();
+  }
+
+  Future<void> _verifierSessionExistante() async {
+    try {
+      // ★ On attend que Supabase.initialize() soit terminé (signal réel),
+      //   avec un maximum de 4s pour ne jamais bloquer si quelque chose
+      //   se passe mal — au-delà, on suppose "pas connecté" par sécurité.
+      await supabasePret.future.timeout(
+        const Duration(seconds: 4),
+        onTimeout: () => debugPrint('⚠️ Supabase pas prêt après 4s'),
+      );
+
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session == null) return; // Pas connecté : onboarding normal.
+
+      final userId = session.user.id;
+      final userData = await Supabase.instance.client
+          .from('users')
+          .select('role, statut')
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (!mounted || _navigationDejaEffectuee) return;
+
+      final role   = (userData?['role'] as String?) ?? 'eleveur';
+      final statut = userData?['statut'] as String?;
+
+      Widget destination;
+      if (role.toLowerCase() == 'veterinaire') {
+        if (statut == 'pending_verification') {
+          destination = const VetPendingPage();
+        } else if (statut == 'rejected') {
+          destination = const VetRejectedPage();
+        } else {
+          destination = const interfaceVeterinaire();
+        }
+      } else {
+        destination = const interfaceElevaur();
+      }
+
+      _navigationDejaEffectuee = true;
+      _autoNavigateTimer?.cancel();
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => destination),
+      );
+    } catch (e) {
+      debugPrint('⚠️ _verifierSessionExistante: $e');
+      // En cas d'erreur, on laisse le flux normal (onboarding) continuer.
+    }
   }
 
   @override
@@ -89,6 +150,8 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
   }
 
   void _navigateToLogin() {
+    if (_navigationDejaEffectuee) return;
+    _navigationDejaEffectuee = true;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         // ★ Acceuil -> Homepage (onboarding). C'est Homepage qui navigue

@@ -85,32 +85,38 @@ class _RetourChaleurDialogState extends State<RetourChaleurDialog>
       child: Dialog(
         shape      : RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
-        child      : Column(
-          mainAxisSize: MainAxisSize.min,
-          children    : [
-            // ── En-tête coloré ─────────────────────────────
-            _buildEntete(suivi),
- 
-            // ── Corps ──────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-              child  : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children          : [
-                  _buildInfoAccouplement(suivi),
-                  const SizedBox(height: 20),
-                  _buildExplication(),
-                  const SizedBox(height: 24),
-                  _buildQuestion(),
-                  const SizedBox(height: 20),
-                  _buildBoutonsReponse(context),
-                  const SizedBox(height: 12),
-                  _buildBoutonPlusTard(context),
-                  const SizedBox(height: 20),
-                ],
+        child      : ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.85,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children    : [
+              // ── En-tête coloré (fixe, ne défile pas) ────────
+              _buildEntete(suivi),
+
+              // ── Corps (défile si le contenu est trop grand) ──
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+                  child  : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children          : [
+                      _buildInfoAccouplement(suivi),
+                      const SizedBox(height: 20),
+                      _buildExplication(),
+                      const SizedBox(height: 24),
+                      _buildQuestion(),
+                      const SizedBox(height: 20),
+                      _buildBoutonsReponse(context),
+                      const SizedBox(height: 12),
+                      _buildBoutonPlusTard(context),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

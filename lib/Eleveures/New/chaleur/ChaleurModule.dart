@@ -12,6 +12,7 @@
 // ============================================================
  
 import 'package:depart/Eleveures/New/Accouplemt/RetourChaleurDialog.dart';
+import 'package:depart/Eleveures/New/Accouplemt/ChecklistGestationPage.dart';
 import 'package:depart/Eleveures/New/Accouplemt/SevrageService.dart';
 import 'package:depart/Eleveures/New/Accouplemt/SevragePage.dart';
 import 'package:depart/Eleveures/New/Accouplemt/RetourChaleurService.dart';
@@ -118,6 +119,11 @@ class _ChaleurModuleState extends State<ChaleurModule>
       await _traiterRetourObserve(suivi);
     } else {
       await _traiterAbsenceRetour(suivi);
+      // ★ Gestation suspectée confirmée : proposer de commencer le
+      //   suivi hebdomadaire tout de suite, pendant que l'éleveur est
+      //   déjà concentré sur cette brebis — plutôt que d'attendre un
+      //   futur rappel qu'il pourrait ignorer.
+      if (mounted) await _proposerSuiviGestation(suivi);
     }
  
     // Rafraîchir les listes et retirer ce suivi de la bannière
@@ -131,6 +137,63 @@ class _ChaleurModuleState extends State<ChaleurModule>
     }
   }
  
+  /// ★ Propose d'ouvrir tout de suite la checklist de gestation, juste
+  ///   après que l'éleveur ait confirmé "pas de retour de chaleur" —
+  ///   plutôt que d'attendre un futur rappel séparé qu'il pourrait
+  ///   ignorer. Reste silencieux en cas d'erreur (non bloquant).
+  Future<void> _proposerSuiviGestation(SuiviRetourChaleur suivi) async {
+    try {
+      final accouplement = await Supabase.instance.client
+          .from('accouplements')
+          .select()
+          .eq('id', int.parse(suivi.accouplementId))
+          .single();
+
+      if (!mounted) return;
+
+      final commencer = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16)),
+          title: Text('🌱 ${suivi.nomBrebis} est probablement gestante !'),
+          content: const Text(
+            'Voulez-vous commencer dès maintenant le suivi hebdomadaire '
+            'de sa gestation (poids, appétit, comportement) ?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Plus tard'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Oui, commencer'),
+            ),
+          ],
+        ),
+      );
+
+      if (commencer == true && mounted) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChecklistGestationPage(
+              accouplement: accouplement,
+              brebis: {
+                'id'    : suivi.brebisId,
+                'nom'   : suivi.nomBrebis,
+                'source': suivi.source,
+              },
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('⚠️ _proposerSuiviGestation: $e');
+    }
+  }
+
   /// OUI : retour en chaleur observé → non fécondée
   Future<void> _traiterRetourObserve(SuiviRetourChaleur suivi) async {
     try {

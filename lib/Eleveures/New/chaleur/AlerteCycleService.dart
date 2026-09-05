@@ -13,6 +13,7 @@
 // ============================================================
  
 import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
+import 'package:depart/Eleveures/New/Reproduction/ReproductionConfig.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
  
@@ -24,10 +25,10 @@ class AlerteCycleService {
   final supabase = Supabase.instance.client;
   final _notif = NotificationService();
  
-  // ── Seuils (jours) ──────────────────────────────────────
-  static const int seuilCycleCourt = 14;
-  static const int seuilCycleLong  = 21;
-  static const int seuilAbsence    = 21;
+  // ── Seuils (jours) — alignés sur ReproductionConfig (cycle Ladoum) ──
+  static const int seuilCycleCourt = ReproductionConfig.cycleMinJours;   // 17
+  static const int seuilCycleLong  = ReproductionConfig.cycleMaxJours;   // 21
+  static const int seuilAbsence    = ReproductionConfig.cycleMaxJours;   // 21
  
   // ============================================================
   // ANALYSER LE CYCLE À L'ENREGISTREMENT D'UNE CHALEUR
@@ -440,4 +441,3 @@ class ResultatAnalyseCycle {
     }
   }
 }
- 

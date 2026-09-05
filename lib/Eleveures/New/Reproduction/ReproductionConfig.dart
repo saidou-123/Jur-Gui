@@ -11,9 +11,10 @@
  
 class ReproductionConfig {
   // ===== CYCLES DE REPRODUCTION =====
-  static const int cycleMoyenJours = 17;
-  static const int cycleMinJours   = 14;
-  static const int cycleMaxJours   = 25;
+  // Basé sur le cycle de reproduction du Ladoum : chaleurs tous les 17 à 21 jours
+  static const int cycleMoyenJours = 19;
+  static const int cycleMinJours   = 17;
+  static const int cycleMaxJours   = 21;
  
   // Durée de la chaleur
   static const int dureeChaleurHeures  = 30;

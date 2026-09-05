@@ -6,9 +6,9 @@
 //   "Skipped N frames" au démarrage. Supabase.initialize() et
 //   Firebase.initializeApp() sont maintenant asynchrones, exécutés
 //   pendant que le splash screen (Acceuil) s'affiche.
-//   ⚠️ Cela suppose qu'aucun widget affiché AVANT Connexion/Acceuil
-//   n'appelle Supabase.instance.client de façon synchrone au build.
-//   Acceuil a un délai de 5s avant de naviguer, largement suffisant.
+//   Acceuil attend le signal `supabasePret` (voir plus bas) avant
+//   d'accéder à Supabase.instance.client — plus besoin de supposer
+//   qu'un délai fixe suffit.
 // ============================================================
 
 import 'dart:async';
@@ -29,6 +29,12 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+
+/// ★ Signal global : se complète une fois Supabase.initialize() terminé.
+/// Tout code qui a besoin de Supabase.instance.client de façon fiable
+/// au tout début de l'app (ex: Acceuil) doit attendre ce futur avant
+/// d'y accéder, plutôt que de supposer qu'un délai fixe suffit.
+final Completer<void> supabasePret = Completer<void>();
 
 // ============================================================
 // HANDLER ARRIÈRE-PLAN FCM
@@ -69,6 +75,10 @@ Future<void> _initApp() async {
     debugPrint('✅ Supabase initialisé');
   } catch (e) {
     debugPrint('❌ Supabase init échoué: $e');
+  } finally {
+    // ★ On complète le signal dans tous les cas (succès ou échec) pour
+    //   qu'Acceuil ne reste jamais bloqué à attendre indéfiniment.
+    if (!supabasePret.isCompleted) supabasePret.complete();
   }
 
   try {

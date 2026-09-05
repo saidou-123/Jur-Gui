@@ -324,23 +324,6 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
       _showSnackBar('Veuillez sélectionner un bélier', Colors.orange);
       return;
     }
-
-    // ✅ CORRECTION : Analyse IA obligatoire dans TOUS les cas, quelle
-    // que soit la source des deux animaux (nee/nee, nee/achete,
-    // achete/achete). Avant, la règle ne s'appliquait que si les DEUX
-    // animaux étaient "nee" — ce qui laissait passer sans analyse un
-    // cas réel de consanguinité parent-enfant (Fifi Jr, née, × son
-    // propre père champion, acheté). Les animaux "achete" peuvent
-    // eux aussi avoir un pedigree connu (source_pere/source_mere),
-    // donc il n'y a plus de raison de les exempter.
-    if (!_analyseEffectuee) {
-      _showSnackBar(
-        'Veuillez d\'abord lancer l\'analyse de consanguinité '
-        '(bouton "Analyser") avant d\'enregistrer.',
-        Colors.orange,
-      );
-      return;
-    }
  
     // Confirmation si risque élevé
     if (_resultatIa != null && _resultatIa!.estRisque) {
