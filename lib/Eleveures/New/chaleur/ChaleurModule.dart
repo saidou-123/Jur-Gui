@@ -357,6 +357,26 @@ class _ChaleurModuleState extends State<ChaleurModule>
         )
         .eq('user_id', userId)
         .isFilter('date_mise_bas', null);
+
+    // ── En lactation (mise bas faite, sevrage pas encore effectué) ──
+    // ★ CORRECTIF : sans cette requête, une brebis redevenait
+    //   "disponible" dès le lendemain de sa mise bas, sans qu'aucune
+    //   vérification ne tienne compte de l'allaitement en cours.
+    final lactations = await supabase
+        .from('accouplements')
+        .select('brebis_id, source_brebis, date_mise_bas')
+        .eq('user_id', userId)
+        .not('date_mise_bas', 'is', null)
+        .isFilter('sevrage_effectue', null);
+
+    final Set<String> lactationSet = {
+      for (var l in lactations)
+        if (DateTime.now()
+                .difference(DateTime.parse(l['date_mise_bas']))
+                .inDays <
+            ReproductionConfig.dureeLactationJours)
+          '${l['source_brebis']}_${l['brebis_id']}'
+    };
  
     // Maps pour lookup O(1)
     final Set<String> enChaleurSet = {
@@ -416,6 +436,7 @@ class _ChaleurModuleState extends State<ChaleurModule>
         ...b,
         'enChaleur'           : enChaleurSet.contains(key),
         'estGestante'         : gestation.contains(key),
+        'estEnLactation'      : lactationSet.contains(key),
         'dateAgnelagePrevu'   : dateAgnelage[key],
         'derniereChaleur'     : derniereChaleurMap[key],
         'ageMois'             : ageMois,
@@ -810,6 +831,7 @@ class _ChaleurModuleState extends State<ChaleurModule>
  
   Widget _buildBrebisCard(Map<String, dynamic> brebis) {
     final estGestante   = brebis['estGestante'] == true;
+    final estEnLactation = brebis['estEnLactation'] == true;
     final enChaleur     = brebis['enChaleur'] == true;
     final tropJeune     = brebis['tropJeune'] == true;
     final ageMois       = brebis['ageMois'] as int?;
@@ -852,6 +874,13 @@ class _ChaleurModuleState extends State<ChaleurModule>
       couleurBadge = _couleurChaleur;
       labelBadge   = 'En chaleur';
       iconeBadge   = Icons.local_fire_department_rounded;
+    } else if (estEnLactation) {
+      // ★ CORRECTIF : brebis mise bas récemment, pas encore sevrée —
+      //   ne doit pas apparaître comme simplement "disponible".
+      couleurBord  = Colors.blue.shade200;
+      couleurBadge = Colors.blue.shade600;
+      labelBadge   = 'En lactation';
+      iconeBadge   = Icons.water_drop_rounded;
     } else if (statutGest == StatutGestation.nonFecondee) {
       // ★ ÉTAPE 5 : badge "non fécondée" pour les brebis récemment confirmées
       couleurBord  = Colors.red.shade200;
@@ -1391,6 +1420,7 @@ class _BottomSheetSelectionBrebisState
  
   Widget _buildItem(Map<String, dynamic> b) {
     final estGestante = b['estGestante'] == true;
+    final estEnLactation = b['estEnLactation'] == true;
     final enChaleur   = b['enChaleur'] == true;
     final tropJeune   = b['tropJeune'] == true;
     final ageMois     = b['ageMois'] as int?;
@@ -1409,6 +1439,12 @@ class _BottomSheetSelectionBrebisState
     } else if (estGestante) {
       couleur       = _couleurGestante;
       avertissement = 'Gestante — vérifiez avant de saisir';
+    } else if (estEnLactation) {
+      // ★ CORRECTIF : brebis pas encore sevrée — plus prête
+      //   biologiquement, mais pas signalée jusqu'ici dans cette liste.
+      bloquee       = true;
+      couleur       = Colors.blue.shade600;
+      avertissement = 'En lactation — pas encore sevrée';
     } else if (enChaleur) {
       couleur       = _couleurChaleur;
       avertissement = 'Déjà enregistrée en chaleur (48h)';

@@ -188,6 +188,18 @@ class _EnregistrerChaleurPageAmelioreeState
         return;
       }
 
+      // ★ CORRECTIF : _enLactation était calculée et affichée (badge
+      //   "🍼 En lactation") mais jamais réellement vérifiée avant
+      //   l'enregistrement — une brebis encore allaitante pouvait être
+      //   accouplée sans aucun avertissement.
+      if (_enLactation) {
+        final confirmer = await _showConfirmationDialog(
+          "Brebis en lactation",
+          ReproductionConfig.messageLactation,
+        );
+        if (confirmer != true) return;
+      }
+
       // 3. Validation — intervalle avec dernière chaleur
       if (_intervalleJours != null) {
         if (_intervalleJours! < ReproductionConfig.cycleMinJours) {
