@@ -9,8 +9,7 @@ import 'package:depart/main.dart' show supabasePret;
 import 'package:depart/pages/Bienvenue/descriptionPages/homePage.dart';
 import 'package:depart/pages/Interface/interfaceEleveur/interfaceElevaur.dart';
 import 'package:depart/pages/Interface/interfaceVeterinaire/interfaceVeterinaire.dart';
-import 'package:depart/pages/Interface/VetPendingPage.dart';
-import 'package:depart/pages/Interface/VetRejectedPage.dart';
+import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
 import 'package:depart/widgets/couleur.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -60,27 +59,32 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
       final userId = session.user.id;
       final userData = await Supabase.instance.client
           .from('users')
-          .select('role, statut')
+          .select('role, statut, motif_rejet')
           .eq('id', userId)
           .maybeSingle();
 
       if (!mounted || _navigationDejaEffectuee) return;
 
-      final role   = (userData?['role'] as String?) ?? 'eleveur';
-      final statut = userData?['statut'] as String?;
+      final role       = ((userData?['role'] as String?) ?? 'eleveur').toLowerCase();
+      final statut     = userData?['statut'] as String?;
+      final motifRejet = userData?['motif_rejet'] as String?;
 
-      Widget destination;
-      if (role.toLowerCase() == 'veterinaire') {
-        if (statut == 'pending_verification') {
-          destination = const VetPendingPage();
-        } else if (statut == 'rejected') {
-          destination = const VetRejectedPage();
-        } else {
-          destination = const interfaceVeterinaire();
-        }
-      } else {
-        destination = const interfaceElevaur();
+      // ✅ Validation admin appliquée à TOUS les rôles (éleveur ET vétérinaire).
+      // statut == null -> ancien compte créé avant la validation générale,
+      // on ne le bloque pas rétroactivement.
+      if (statut == 'pending_verification' || statut == 'rejected') {
+        _navigationDejaEffectuee = true;
+        _autoNavigateTimer?.cancel();
+        await _bloquerAccesSessionExistante(
+          statut: statut!,
+          motifRejet: motifRejet,
+        );
+        return;
       }
+
+      final Widget destination = role == 'veterinaire'
+          ? const interfaceVeterinaire()
+          : const interfaceElevaur();
 
       _navigationDejaEffectuee = true;
       _autoNavigateTimer?.cancel();
@@ -90,6 +94,78 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
     } catch (e) {
       debugPrint('⚠️ _verifierSessionExistante: $e');
       // En cas d'erreur, on laisse le flux normal (onboarding) continuer.
+    }
+  }
+
+  // ===== SESSION EXISTANTE MAIS COMPTE NON VALIDÉ =====
+  // Au lieu d'une page plein écran, on notifie (push/locale) + une petite
+  // alerte, puis on déconnecte et on renvoie vers l'onboarding/connexion.
+  Future<void> _bloquerAccesSessionExistante({
+    required String statut,
+    String? motifRejet,
+  }) async {
+    final estRejete = statut == 'rejected';
+
+    final titre = estRejete
+        ? 'Compte non validé'
+        : 'Compte en cours de vérification';
+    final corps = estRejete
+        ? (motifRejet != null && motifRejet.isNotEmpty
+            ? 'Votre compte n\'a pas été validé : $motifRejet'
+            : 'Votre compte n\'a pas pu être validé par notre équipe.')
+        : 'Votre compte est en cours de vérification par notre équipe. '
+            'Vous serez notifié dès qu\'une décision sera prise.';
+
+    try {
+      await NotificationService().afficherNotificationImmediateLocal(
+        titre: titre,
+        corps: corps,
+        type: estRejete ? 'compte_rejete' : 'compte_en_attente',
+        urgente: estRejete,
+      );
+    } catch (e) {
+      debugPrint('⚠️ Notification statut compte échouée (non bloquant) : $e');
+    }
+
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        icon: Icon(
+          estRejete ? Icons.cancel_outlined : Icons.hourglass_top_rounded,
+          color: estRejete ? Colors.red : Colors.orange[700],
+          size: 56,
+        ),
+        title: Text(
+          titre,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: Text(corps, textAlign: TextAlign.center),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: estRejete ? Colors.red : Colors.orange[700],
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('J\'ai compris'),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    await Supabase.instance.client.auth.signOut();
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const Homepage()),
+      );
     }
   }
 

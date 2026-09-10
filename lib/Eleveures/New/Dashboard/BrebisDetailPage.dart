@@ -814,6 +814,23 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Center(
+              child: TextButton.icon(
+                onPressed: _annulerGestation,
+                icon : Icon(Icons.cancel_outlined,
+                    size: 14, color: Colors.red.shade400),
+                label: Text('Annuler la gestation',
+                    style: TextStyle(fontSize: 12, color: Colors.red.shade400)),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -834,7 +851,82 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
     if (result == true && mounted) _chargerDonnees();
   }
 
-  // ★ ÉTAPE 7 : Préparation mise bas
+  // ★ NOUVEAU : Annuler une gestation en cours
+  Future<void> _annulerGestation() async {
+    if (_gestationCourante == null) return;
+
+    final confirmer = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Annuler cette gestation ?'),
+        content: const Text(
+          'Cette action remet la brebis comme non fécondée : le suivi de '
+          'gestation, la checklist remplie et les rappels programmés '
+          '(retour de chaleur, approche de mise bas) seront supprimés. '
+          'Cette action est irréversible.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Non, garder'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("Oui, annuler"),
+          ),
+        ],
+      ),
+    );
+    if (confirmer != true) return;
+
+    try {
+      final accouplementId = _gestationCourante!['id'];
+      final supabase = Supabase.instance.client;
+
+      // 1. Remettre l'accouplement à "non fécondée"
+      await supabase.from('accouplements').update({
+        'statut_gestation'       : 'non_fecondee',
+        'date_confirmation_statut': DateTime.now().toIso8601String(),
+      }).eq('id', accouplementId);
+
+      // 2. Nettoyer le suivi hebdomadaire déjà rempli
+      await supabase
+          .from('checklist_gestation')
+          .delete()
+          .eq('accouplement_id', accouplementId.toString());
+
+      // 3. Nettoyer un éventuel suivi de retour de chaleur en attente
+      await supabase
+          .from('suivis_retour_chaleur')
+          .delete()
+          .eq('accouplement_id', accouplementId.toString());
+
+      // 4. Annuler les notifications encore programmées (pas déjà envoyées)
+      //    liées à cet accouplement précis, via le champ metadata.
+      await supabase
+          .from('notifications_programmees')
+          .delete()
+          .eq('statut', 'planifie')
+          .eq('metadata->>accouplement_id', accouplementId.toString());
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gestation annulée.')),
+        );
+        _chargerDonnees();
+      }
+    } catch (e) {
+      debugPrint('❌ _annulerGestation: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur lors de l\'annulation : $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _ouvrirPreparationMiseBas() async {
     final accouplement = _accouplements
         .where((a) => a['date_mise_bas'] == null)
@@ -1014,14 +1106,26 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
       return _buildVide(message: 'Aucun accouplement enregistré');
     }
 
-    final echoues = _totalAccouplements - _totalAgnelages;
+    // ★ CORRECTIF : une gestation en cours (pas encore arrivée à terme)
+    //   était comptée comme "sans agnelage" au même titre qu'un vrai
+    //   échec — alors qu'elle n'a simplement pas encore abouti.
+    final enCours = _accouplements
+        .where((a) =>
+            a['date_mise_bas'] == null &&
+            a['statut_gestation'] != 'non_fecondee')
+        .length;
+    final echoues = _accouplements
+        .where((a) => a['statut_gestation'] == 'non_fecondee')
+        .length;
+
     final sections = [
       if (_totalAgnelages > 0)
         _PieData('Agnelages réussis', _totalAgnelages.toDouble(),
             _couleurAgnelage),
+      if (enCours > 0)
+        _PieData('En cours', enCours.toDouble(), Colors.blue.shade300),
       if (echoues > 0)
-        _PieData('Accouplements sans agnelage', echoues.toDouble(),
-            Colors.grey.shade300),
+        _PieData('Échoués', echoues.toDouble(), Colors.grey.shade300),
     ];
 
     return Container(

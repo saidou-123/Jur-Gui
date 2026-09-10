@@ -349,6 +349,10 @@ class _ChaleurModuleState extends State<ChaleurModule>
         .gte('date_chaleur', il48h);
  
     // ── Gestations en cours — ENRICHI étape 5 ──
+    // ★ CORRECTIF : sans le filtre sur statut_gestation, une brebis
+    //   dont l'accouplement était marqué "non_fecondee" (échec confirmé
+    //   ou gestation annulée) restait classée "gestante" indéfiniment,
+    //   puisque date_mise_bas reste vide dans ce cas aussi.
     final gestations = await supabase
         .from('accouplements')
         .select(
@@ -356,7 +360,9 @@ class _ChaleurModuleState extends State<ChaleurModule>
           'statut_gestation, probabilite_gestation', // ★ ÉTAPE 5
         )
         .eq('user_id', userId)
-        .isFilter('date_mise_bas', null);
+        .isFilter('date_mise_bas', null)
+        .inFilter('statut_gestation',
+            ['en_attente', 'gestation_suspectee', 'gestation_confirmee']);
 
     // ── En lactation (mise bas faite, sevrage pas encore effectué) ──
     // ★ CORRECTIF : sans cette requête, une brebis redevenait

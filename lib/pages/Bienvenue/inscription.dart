@@ -5,8 +5,8 @@
 
 import 'dart:io';
 
-import 'package:depart/Eleveures/New/Notification/NotificationService.dart';
 import 'package:depart/pages/Bienvenue/connexion.dart';
+import 'package:depart/pages/Bienvenue/verification_code.dart';
 import 'package:depart/securite/ErrorHandler.dart';
 import 'package:depart/securite/Validators.dart';
 import 'package:depart/widgets/couleur.dart';
@@ -153,38 +153,22 @@ class _InscriptionState extends State<Inscription> {
                 .eq('id', userId);
             debugPrint('✅ photo_carte_pro_url enregistré');
           }
-
-          // ✅ Déclenche l'email "dossier en cours de vérification (72h)"
-          // Non bloquant : si ça échoue, l'inscription reste valide,
-          // le vétérinaire verra simplement la page d'attente dans l'app.
-          try {
-            final session = _supabase.auth.currentSession;
-            if (session != null) {
-              await _supabase.functions.invoke(
-                'notifier-statut-veterinaire',
-                body: {'user_id': userId, 'event': 'inscription'},
-                headers: {'Authorization': 'Bearer ${session.accessToken}'},
-              );
-              debugPrint('✅ Email "en cours de vérification" déclenché');
-            }
-          } catch (e) {
-            debugPrint('⚠️ Envoi email inscription échoué (non bloquant) : $e');
-          }
         }
 
-        // ✅ Notification locale + push : "confirmez votre email"
-        // S'applique à tous les rôles (éleveur et vétérinaire).
-        // Non bloquant : l'inscription reste valide même si ça échoue.
-        try {
-          await NotificationService().notifierInscriptionEnAttenteConfirmation(
-            userId: userId,
-          );
-        } catch (e) {
-          debugPrint('⚠️ Notification confirmation email échouée (non bloquant) : $e');
-        }
-
-        // ✅ Succès
-        await _showSuccessDialog();
+        // ✅ Un code à 6 chiffres vient d'être envoyé par email
+        // (via le hook "Send Email" -> Brevo). L'email "en attente (72h)"
+        // ne sera déclenché qu'APRÈS validation de ce code, pas avant
+        // (voir VerificationCodePage._verifierCode).
+        if (!mounted) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => VerificationCodePage(
+              email: email,
+              userId: userId,
+              role: _roleSelectionne!,
+            ),
+          ),
+        );
       }
     } catch (error, stackTrace) {
       // ✅ Cas spécial : email déjà utilisé → dialogue dédié plus clair
@@ -268,76 +252,6 @@ class _InscriptionState extends State<Inscription> {
     }
   }
 
-  // ===== DIALOGUE DE SUCCÈS =====
-  Future<void> _showSuccessDialog() async {
-    return showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        icon: const Icon(
-          Icons.check_circle,
-          color: Colors.green,
-          size: 64,
-        ),
-        title: const Text(
-          '✅ Inscription réussie !',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Votre compte a été créé avec succès.',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue, width: 2),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.email, color: Colors.blue),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Vérifiez votre email pour confirmer votre compte.',
-                      style: TextStyle(fontSize: 13),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(
-                  builder: (context) => const Connexion(),
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Se connecter'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -366,6 +280,13 @@ class _InscriptionState extends State<Inscription> {
                 // Photo de carte professionnelle (vétérinaire uniquement)
                 if (_roleSelectionne == 'veterinaire') ...[
                   _buildPhotoCartePro(),
+                  const SizedBox(height: 24),
+                ],
+
+                // Notice de validation admin pour l'éleveur
+                // (le vétérinaire a déjà sa propre notice dans _buildPhotoCartePro)
+                if (_roleSelectionne == 'eleveur') ...[
+                  _buildNoticeValidationEleveur(),
                   const SizedBox(height: 24),
                 ],
 
@@ -606,6 +527,45 @@ class _InscriptionState extends State<Inscription> {
                         ),
                       ],
                     ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // NOTICE DE VALIDATION — affichée pour l'éleveur
+  // (pas de document à uploader, juste une information du délai)
+  // ============================================================
+  Widget _buildNoticeValidationEleveur() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.orange[50],
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.orange[200]!, width: 2),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline, color: Colors.orange[700]),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '📋 Validation du compte',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Votre compte sera vérifié manuellement avant validation '
+                  '(délai habituel : jusqu\'à 72h).',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                ),
+              ],
             ),
           ),
         ],

@@ -4,6 +4,7 @@
 // Dépendance: fl_chart: ^0.68.0 (à ajouter dans pubspec.yaml)
 // ============================================================
 
+import 'package:depart/Eleveures/New/Reproduction/ReproductionConfig.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -34,11 +35,11 @@ class _DashboardReproductionState extends State<DashboardReproduction>
   int _totalBrebis = 0;
   int _brebisEnChaleur = 0;
   int _brebisGestantes = 0;
+  int _brebisEnLactation = 0;
   int _agnelauxCeMois = 0;
   double _tauxFertilite = 0.0;
 
   // Données pour graphique en barres groupées
-  int _touchedGroupIndex = -1;
 
   // Données pour graphique circulaire
   int _touchedPieIndex = -1;
@@ -111,13 +112,34 @@ class _DashboardReproductionState extends State<DashboardReproduction>
     _totalBrebis = achetes.length + nees.length;
 
     // Brebis gestantes
+    // ★ CORRECTIF : sans le filtre sur statut_gestation, une brebis dont
+    //   l'accouplement avait échoué ('non_fecondee') restait comptée
+    //   comme "Gestantes" indéfiniment, faussant le graphique.
     final gestantes = await supabase
         .from('accouplements')
         .select('id')
         .eq('user_id', userId)
-        .isFilter('date_mise_bas', null);
+        .isFilter('date_mise_bas', null)
+        .inFilter('statut_gestation',
+            ['en_attente', 'gestation_suspectee', 'gestation_confirmee']);
 
     _brebisGestantes = gestantes.length;
+
+    // ★ CORRECTIF : brebis en lactation (mise bas faite, sevrage pas
+    //   encore effectué) — sans cela, elles étaient comptées à tort
+    //   dans "Libres" alors qu'elles ne sont pas disponibles.
+    final lactations = await supabase
+        .from('accouplements')
+        .select('date_mise_bas')
+        .eq('user_id', userId)
+        .not('date_mise_bas', 'is', null)
+        .isFilter('sevrage_effectue', null);
+
+    _brebisEnLactation = lactations
+        .where((l) =>
+            DateTime.now().difference(DateTime.parse(l['date_mise_bas'])).inDays <
+            ReproductionConfig.dureeLactationJours)
+        .length;
 
     // Brebis en chaleur (dernières 48h)
     final il48h =
@@ -278,18 +300,11 @@ class _DashboardReproductionState extends State<DashboardReproduction>
               _buildKPICards(),
               const SizedBox(height: 24),
 
-              // Graphique évolution (barres groupées)
+              // Graphique évolution — FUSIONNÉ (chaleurs + accouplements + agnelages)
               _buildTitreSection(
                   '📊 Évolution mensuelle', 'Chaleurs · Accouplements · Agnelages'),
               const SizedBox(height: 12),
-              _buildGraphiqueEvolution(),
-              const SizedBox(height: 24),
-
-              // Graphique ligne — tendance chaleurs
-              _buildTitreSection(
-                  '🔥 Tendance des chaleurs', 'Nombre de chaleurs détectées par mois'),
-              const SizedBox(height: 12),
-              _buildGraphiqueLigneChaleurs(),
+              _buildGraphiqueEvolutionFusionnee(),
               const SizedBox(height: 24),
 
               // Graphique circulaire — état du troupeau
@@ -297,13 +312,6 @@ class _DashboardReproductionState extends State<DashboardReproduction>
                   '🐑 État actuel du troupeau', 'Répartition par statut reproductif'),
               const SizedBox(height: 12),
               _buildGraphiqueCirculaire(),
-              const SizedBox(height: 24),
-
-              // Graphique ligne — agnelages cumulés
-              _buildTitreSection(
-                  '🍼 Agnelages cumulés', 'Progression sur la période'),
-              const SizedBox(height: 12),
-              _buildGraphiqueAgnelagesCumules(),
             ],
           ),
         ),
@@ -504,13 +512,39 @@ class _DashboardReproductionState extends State<DashboardReproduction>
 
   // ===== GRAPHIQUE 1 : BARRES GROUPÉES — ÉVOLUTION =====
 
-  Widget _buildGraphiqueEvolution() {
+  Widget _buildGraphiqueEvolutionFusionnee() {
     if (_donnesMensuelles.isEmpty) return _buildEmptyChart();
 
     final maxY = _donnesMensuelles
         .map((d) => [d.chaleurs, d.accouplements, d.agnelages])
         .expand((e) => e)
         .reduce((a, b) => a > b ? a : b);
+
+    List<FlSpot> spotsPour(double Function(_MoisData) get) =>
+        _donnesMensuelles
+            .asMap()
+            .entries
+            .map((e) => FlSpot(e.key.toDouble(), get(e.value)))
+            .toList();
+
+    LineChartBarData ligne(List<FlSpot> spots, Color couleur) =>
+        LineChartBarData(
+          spots: spots,
+          isCurved: true,
+          curveSmoothness: 0.35,
+          color: couleur,
+          barWidth: 2.5,
+          isStrokeCapRound: true,
+          dotData: FlDotData(
+            show: true,
+            getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+              radius: 3.5,
+              color: Colors.white,
+              strokeWidth: 2,
+              strokeColor: couleur,
+            ),
+          ),
+        );
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 20, 16, 12),
@@ -522,37 +556,29 @@ class _DashboardReproductionState extends State<DashboardReproduction>
           const SizedBox(height: 20),
           SizedBox(
             height: 220,
-            child: BarChart(
-              BarChartData(
-                alignment: BarChartAlignment.spaceAround,
-                maxY: (maxY + 2).clamp(5, double.infinity),
+            child: LineChart(
+              LineChartData(
                 minY: 0,
-                groupsSpace: 10,
-                barTouchData: BarTouchData(
-                  touchTooltipData: BarTouchTooltipData(
+                maxY: (maxY + 2).clamp(5, double.infinity),
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
                     getTooltipColor: (_) => Colors.grey[850]!,
                     tooltipBorderRadius: BorderRadius.circular(10),
-                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                      final labels = ['Chaleurs', 'Accouplements', 'Agnelages'];
-                      return BarTooltipItem(
-                        '${labels[rodIndex]}: ${rod.toY.toInt()}',
-                        const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                      );
+                    getTooltipItems: (touchedSpots) {
+                      const labels = ['Chaleurs', 'Accouplements', 'Agnelages'];
+                      return touchedSpots.map((s) {
+                        return LineTooltipItem(
+                          '${labels[s.barIndex]}: ${s.y.toInt()}',
+                          const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12,
+                          ),
+                        );
+                      }).toList();
                     },
                   ),
-                  touchCallback: (event, response) {
-                    setState(() {
-                      if (response == null || response.spot == null) {
-                        _touchedGroupIndex = -1;
-                      } else {
-                        _touchedGroupIndex = response.spot!.touchedBarGroupIndex;
-                      }
-                    });
-                  },
+                  handleBuiltInTouches: true,
                 ),
                 titlesData: FlTitlesData(
                   leftTitles: AxisTitles(
@@ -610,35 +636,18 @@ class _DashboardReproductionState extends State<DashboardReproduction>
                   ),
                 ),
                 borderData: FlBorderData(show: false),
-                barGroups: List.generate(_donnesMensuelles.length, (index) {
-                  final d = _donnesMensuelles[index];
-                  final isSelected = index == _touchedGroupIndex;
-                  return BarChartGroupData(
-                    x: index,
-                    groupVertically: false,
-                    barRods: [
-                      _buildBar(d.chaleurs, _couleurChaleur, isSelected),
-                      _buildBar(d.accouplements, _couleurAccouplement, isSelected),
-                      _buildBar(d.agnelages, _couleurAgnelage, isSelected),
-                    ],
-                  );
-                }),
+                lineBarsData: [
+                  ligne(spotsPour((d) => d.chaleurs), _couleurChaleur),
+                  ligne(spotsPour((d) => d.accouplements), _couleurAccouplement),
+                  ligne(spotsPour((d) => d.agnelages), _couleurAgnelage),
+                ],
               ),
-              duration: const Duration(milliseconds: 600),
+              duration: const Duration(milliseconds: 700),
               curve: Curves.easeInOutCubic,
             ),
           ),
         ],
       ),
-    );
-  }
-
-  BarChartRodData _buildBar(double value, Color color, bool isSelected) {
-    return BarChartRodData(
-      toY: value,
-      color: isSelected ? color : color.withOpacity(0.75),
-      width: 8,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
     );
   }
 
@@ -681,144 +690,19 @@ class _DashboardReproductionState extends State<DashboardReproduction>
 
   // ===== GRAPHIQUE 2 : LIGNE — TENDANCE CHALEURS =====
 
-  Widget _buildGraphiqueLigneChaleurs() {
-    if (_donnesMensuelles.isEmpty) return _buildEmptyChart();
-
-    final spots = _donnesMensuelles
-        .asMap()
-        .entries
-        .map((e) => FlSpot(e.key.toDouble(), e.value.chaleurs))
-        .toList();
-
-    final maxY = spots.map((s) => s.y).reduce((a, b) => a > b ? a : b);
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 20, 16, 12),
-      decoration: _cardDecoration(),
-      child: SizedBox(
-        height: 200,
-        child: LineChart(
-          LineChartData(
-            minY: 0,
-            maxY: (maxY + 2).clamp(5, double.infinity),
-            lineTouchData: LineTouchData(
-              touchTooltipData: LineTouchTooltipData(
-                getTooltipColor: (_) => Colors.grey[850]!,
-                tooltipBorderRadius: BorderRadius.circular(10),
-                getTooltipItems: (touchedSpots) => touchedSpots
-                    .map((s) => LineTooltipItem(
-                          '${s.y.toInt()} chaleur${s.y > 1 ? 's' : ''}',
-                          const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 12,
-                          ),
-                        ))
-                    .toList(),
-              ),
-              handleBuiltInTouches: true,
-            ),
-            titlesData: FlTitlesData(
-              leftTitles: AxisTitles(
-                sideTitles: SideTitles(
-                  showTitles: true,
-                  reservedSize: 28,
-                  interval: (maxY / 4).ceilToDouble().clamp(1, double.infinity),
-                  getTitlesWidget: (value, meta) => Text(
-                    value.toInt().toString(),
-                    style: TextStyle(color: Colors.grey[500], fontSize: 11),
-                  ),
-                ),
-              ),
-              rightTitles:
-                  const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-              topTitles:
-                  const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-              bottomTitles: AxisTitles(
-                sideTitles: SideTitles(
-                  showTitles: true,
-                  reservedSize: 32,
-                  getTitlesWidget: (value, meta) {
-                    final index = value.toInt();
-                    if (index < 0 || index >= _donnesMensuelles.length) {
-                      return const SizedBox.shrink();
-                    }
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        _nomMoisCourt(_donnesMensuelles[index].mois.month),
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-            gridData: FlGridData(
-              show: true,
-              drawVerticalLine: false,
-              horizontalInterval:
-                  (maxY / 4).ceilToDouble().clamp(1, double.infinity),
-              getDrawingHorizontalLine: (_) => FlLine(
-                color: Colors.grey[200]!,
-                strokeWidth: 1,
-                dashArray: [4, 4],
-              ),
-            ),
-            borderData: FlBorderData(show: false),
-            lineBarsData: [
-              LineChartBarData(
-                spots: spots,
-                isCurved: true,
-                curveSmoothness: 0.35,
-                color: _couleurChaleur,
-                barWidth: 3,
-                isStrokeCapRound: true,
-                dotData: FlDotData(
-                  show: true,
-                  getDotPainter: (spot, percent, bar, index) =>
-                      FlDotCirclePainter(
-                    radius: 4,
-                    color: Colors.white,
-                    strokeWidth: 2.5,
-                    strokeColor: _couleurChaleur,
-                  ),
-                ),
-                belowBarData: BarAreaData(
-                  show: true,
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      _couleurChaleur.withOpacity(0.25),
-                      _couleurChaleur.withOpacity(0.02),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          duration: const Duration(milliseconds: 700),
-          curve: Curves.easeInOutCubic,
-        ),
-      ),
-    );
-  }
 
   // ===== GRAPHIQUE 3 : CIRCULAIRE — ÉTAT DU TROUPEAU =====
 
   Widget _buildGraphiqueCirculaire() {
     final brebisLibres =
-        (_totalBrebis - _brebisGestantes - _brebisEnChaleur).clamp(0, _totalBrebis);
+        (_totalBrebis - _brebisGestantes - _brebisEnChaleur - _brebisEnLactation)
+            .clamp(0, _totalBrebis);
 
     final sections = [
       _PieSection('Libres', brebisLibres.toDouble(), _couleurSecondaire),
       _PieSection('Gestantes', _brebisGestantes.toDouble(), _couleurAccouplement),
       _PieSection('En chaleur', _brebisEnChaleur.toDouble(), _couleurChaleur),
+      _PieSection('En lactation', _brebisEnLactation.toDouble(), Colors.blue.shade600),
     ].where((s) => s.valeur > 0).toList();
 
     if (sections.isEmpty || _totalBrebis == 0) {
@@ -1018,174 +902,6 @@ class _DashboardReproductionState extends State<DashboardReproduction>
 
   // ===== GRAPHIQUE 4 : LIGNE — AGNELAGES CUMULÉS =====
 
-  Widget _buildGraphiqueAgnelagesCumules() {
-    if (_donnesMensuelles.isEmpty) return _buildEmptyChart();
-
-    double cumul = 0;
-    final spotsCumul = _donnesMensuelles.asMap().entries.map((e) {
-      cumul += e.value.agnelages;
-      return FlSpot(e.key.toDouble(), cumul);
-    }).toList();
-
-    final spotsAgnelages = _donnesMensuelles
-        .asMap()
-        .entries
-        .map((e) => FlSpot(e.key.toDouble(), e.value.agnelages))
-        .toList();
-
-    final maxY = cumul.clamp(5, double.infinity);
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 20, 16, 12),
-      decoration: _cardDecoration(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _legendeItem(_couleurAgnelage, 'Mensuel'),
-              const SizedBox(width: 16),
-              _legendeItem(_couleurPrimaire, 'Cumulé'),
-            ],
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            height: 200,
-            child: LineChart(
-              LineChartData(
-                minY: 0,
-                maxY: maxY + 1,
-                lineTouchData: LineTouchData(
-                  touchTooltipData: LineTouchTooltipData(
-                    getTooltipColor: (_) => Colors.grey[850]!,
-                    tooltipBorderRadius: BorderRadius.circular(10),
-                    getTooltipItems: (touchedSpots) {
-                      return touchedSpots.map((s) {
-                        final label = s.barIndex == 0 ? 'Mensuel' : 'Cumulé';
-                        return LineTooltipItem(
-                          '$label: ${s.y.toInt()}',
-                          TextStyle(
-                            color: s.barIndex == 0
-                                ? _couleurAgnelage
-                                : _couleurPrimaire,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 12,
-                          ),
-                        );
-                      }).toList();
-                    },
-                  ),
-                  handleBuiltInTouches: true,
-                ),
-                titlesData: FlTitlesData(
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 28,
-                      interval: (maxY / 4).ceilToDouble().clamp(1, double.infinity),
-                      getTitlesWidget: (value, meta) => Text(
-                        value.toInt().toString(),
-                        style: TextStyle(color: Colors.grey[500], fontSize: 11),
-                      ),
-                    ),
-                  ),
-                  rightTitles:
-                      const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  topTitles:
-                      const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 32,
-                      getTitlesWidget: (value, meta) {
-                        final index = value.toInt();
-                        if (index < 0 || index >= _donnesMensuelles.length) {
-                          return const SizedBox.shrink();
-                        }
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            _nomMoisCourt(_donnesMensuelles[index].mois.month),
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  horizontalInterval:
-                      (maxY / 4).ceilToDouble().clamp(1, double.infinity),
-                  getDrawingHorizontalLine: (_) => FlLine(
-                    color: Colors.grey[200]!,
-                    strokeWidth: 1,
-                    dashArray: [4, 4],
-                  ),
-                ),
-                borderData: FlBorderData(show: false),
-                lineBarsData: [
-                  // Ligne mensuelle
-                  LineChartBarData(
-                    spots: spotsAgnelages,
-                    isCurved: false,
-                    color: _couleurAgnelage,
-                    barWidth: 2,
-                    dotData: FlDotData(
-                      show: true,
-                      getDotPainter: (spot, _, __, ___) => FlDotCirclePainter(
-                        radius: 3.5,
-                        color: Colors.white,
-                        strokeWidth: 2,
-                        strokeColor: _couleurAgnelage,
-                      ),
-                    ),
-                    belowBarData: BarAreaData(show: false),
-                  ),
-                  // Ligne cumulée
-                  LineChartBarData(
-                    spots: spotsCumul,
-                    isCurved: true,
-                    curveSmoothness: 0.3,
-                    color: _couleurPrimaire,
-                    barWidth: 3,
-                    isStrokeCapRound: true,
-                    dotData: FlDotData(
-                      show: true,
-                      getDotPainter: (spot, _, __, ___) => FlDotCirclePainter(
-                        radius: 4,
-                        color: Colors.white,
-                        strokeWidth: 2.5,
-                        strokeColor: _couleurPrimaire,
-                      ),
-                    ),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          _couleurPrimaire.withOpacity(0.15),
-                          _couleurPrimaire.withOpacity(0.01),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              duration: const Duration(milliseconds: 700),
-              curve: Curves.easeInOutCubic,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   // ===== ÉTAT VIDE =====
 
