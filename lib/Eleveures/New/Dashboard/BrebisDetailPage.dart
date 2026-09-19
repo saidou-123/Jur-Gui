@@ -191,7 +191,13 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
     }
 
     // Statut actuel
-    final enGestation = _accouplements.any((a) => a['date_mise_bas'] == null);
+    // ★ CORRECTIF : sans le filtre sur statut_gestation, une gestation
+    //   annulée (ou un accouplement non fécondé) restait affichée comme
+    //   "Gestante" indéfiniment, puisque date_mise_bas reste vide dans
+    //   ce cas aussi — le cycle semblait "continuer" après annulation.
+    final enGestation = _accouplements.any((a) =>
+        a['date_mise_bas'] == null &&
+        a['statut_gestation'] != 'non_fecondee');
     final il48h = DateTime.now().subtract(const Duration(hours: 48));
     final enChaleur = _chaleurs.isNotEmpty &&
         DateTime.parse(_chaleurs.first['date_chaleur']).isAfter(il48h);
@@ -200,8 +206,9 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
       _statutActuel = 'Gestante 🤰';
       _couleurStatut = const Color(0xFF8E24AA);
       // Chercher date agnelage prévu
-      final gestationCourante =
-          _accouplements.firstWhere((a) => a['date_mise_bas'] == null);
+      final gestationCourante = _accouplements.firstWhere((a) =>
+          a['date_mise_bas'] == null &&
+          a['statut_gestation'] != 'non_fecondee');
       _gestationCourante = gestationCourante; // ★ CORRECTIF : oubli d'assignation
       if (gestationCourante['date_prevue_agnelage'] != null) {
         _dateAgnelagePrevu =
@@ -929,7 +936,9 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
 
   Future<void> _ouvrirPreparationMiseBas() async {
     final accouplement = _accouplements
-        .where((a) => a['date_mise_bas'] == null)
+        .where((a) =>
+            a['date_mise_bas'] == null &&
+            a['statut_gestation'] != 'non_fecondee')
         .firstOrNull;
     if (accouplement == null || !mounted) return;
     await Navigator.push(
@@ -946,7 +955,9 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
   // ★ ÉTAPE 8 : Déclaration mise bas
   Future<void> _ouvrirDeclarationMiseBas() async {
     final accouplement = _accouplements
-        .where((a) => a['date_mise_bas'] == null)
+        .where((a) =>
+            a['date_mise_bas'] == null &&
+            a['statut_gestation'] != 'non_fecondee')
         .firstOrNull;
     if (accouplement == null) {
       ScaffoldMessenger.of(context).showSnackBar(
