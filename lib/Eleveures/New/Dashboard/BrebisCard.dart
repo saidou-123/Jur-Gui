@@ -35,11 +35,11 @@ class BrebisCard extends StatelessWidget {
 
     if (estGestante) {
       couleurBord = _couleurAccouplement;
-      badge = 'Gestante 🤰';
+      badge = 'Gestante 🐑💗';
       couleurBadge = _couleurAccouplement;
     } else if (enChaleur) {
       couleurBord = _couleurChaleur;
-      badge = 'En chaleur 🔥';
+      badge = 'En chaleur 🐑❤️‍🔥';
       couleurBadge = _couleurChaleur;
     } else {
       couleurBord = Colors.grey.shade200;

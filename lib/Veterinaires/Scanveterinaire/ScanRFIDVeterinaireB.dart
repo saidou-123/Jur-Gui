@@ -42,6 +42,13 @@ class _ScanRFIDVeterinaireBluetoothState
   Map<String, dynamic>? _animalInfo;
   String? _sourceTable;
 
+  // ========== ÉTAT ACTUEL DES FEMELLES ==========
+  Map<String, dynamic>? _femaleStatus;
+  bool _loadingFemale = false;
+
+  bool get _isFemale =>
+      (_animalInfo?['sexe'] ?? '').toString().toLowerCase().startsWith('f');
+
   @override
   void initState() {
     super.initState();
@@ -462,6 +469,8 @@ class _ScanRFIDVeterinaireBluetoothState
       _lastScannedUID = cleanUid;
       _animalInfo = null;
       _sourceTable = null;
+      _femaleStatus = null;
+      _loadingFemale = false;
     });
 
     _showSnackBar("🔍 Recherche en cours...", Colors.blue);
@@ -484,6 +493,7 @@ class _ScanRFIDVeterinaireBluetoothState
             _isSearching = false;
           });
           _showSnackBar("✅ Animal trouvé : ${result['nom']}", Colors.green);
+          if (_isFemale) _loadFemaleStatus(result['id'].toString(), 'nee');
         }
         return;
       }
@@ -505,6 +515,7 @@ class _ScanRFIDVeterinaireBluetoothState
             _isSearching = false;
           });
           _showSnackBar("✅ Animal trouvé : ${result['nom']}", Colors.green);
+          if (_isFemale) _loadFemaleStatus(result['id'].toString(), 'achete');
         }
         return;
       }
@@ -526,6 +537,128 @@ class _ScanRFIDVeterinaireBluetoothState
         setState(() => _isSearching = false);
         _showSnackBar("Erreur: ${e.toString()}", Colors.red);
       }
+    }
+  }
+
+  // =====================================================
+  // ÉTAT ACTUEL D'UNE FEMELLE (gestation, chaleurs, vaccins...)
+  // =====================================================
+  Future<void> _loadFemaleStatus(String animalId, String source) async {
+    final db = Supabase.instance.client;
+    if (mounted) setState(() => _loadingFemale = true);
+
+    try {
+      final r = await Future.wait<dynamic>([
+        // 0 : dernier accouplement / gestation
+        db
+            .from('accouplements')
+            .select('date_accouplement, date_prevue_agnelage, date_mise_bas, '
+                'statut_gestation, semaine_gestation, probabilite_gestation, '
+                'nombre_agneaux, sevrage_effectue')
+            .eq('brebis_id', animalId)
+            .eq('source_brebis', source)
+            .order('date_accouplement', ascending: false)
+            .limit(1),
+        // 1 : dernière chaleur
+        db
+            .from('chaleurs')
+            .select('date_chaleur, intensite')
+            .eq('animal_id', animalId)
+            .eq('source', source)
+            .order('date_chaleur', ascending: false)
+            .limit(1),
+        // 2 : dernier vaccin
+        db
+            .from('vaccinations')
+            .select('nom_vaccin, date_vaccination, date_rappel')
+            .eq('animal_id', animalId)
+            .eq('source', source)
+            .order('date_vaccination', ascending: false)
+            .limit(1),
+        // 3 : alertes santé non résolues
+        db
+            .from('alertes_sante')
+            .select('type_alerte, message, priorite')
+            .eq('animal_id', animalId)
+            .eq('source', source)
+            .eq('resolue', false),
+        // 4 : dernière consultation
+        db
+            .from('consultations')
+            .select('date_consultation, motif, diagnostic, poids_kg, '
+                'temperature_c')
+            .eq('animal_id', animalId)
+            .eq('source', source)
+            .order('date_consultation', ascending: false)
+            .limit(1),
+      ]);
+
+      // Ignorer si le vétérinaire a déjà scanné un autre animal
+      if (!mounted || _animalInfo?['id']?.toString() != animalId) return;
+
+      Map<String, dynamic>? first(dynamic l) =>
+          (l as List).isEmpty ? null : Map<String, dynamic>.from(l.first);
+
+      setState(() {
+        _femaleStatus = {
+          'accouplement': first(r[0]),
+          'chaleur': first(r[1]),
+          'vaccin': first(r[2]),
+          'alertes': r[3] as List,
+          'consultation': first(r[4]),
+        };
+        _loadingFemale = false;
+      });
+    } catch (e, stack) {
+      debugPrint("❌ Erreur état femelle: $e\n$stack");
+      if (mounted) setState(() => _loadingFemale = false);
+    }
+  }
+
+  String _fmtDate(dynamic v) {
+    if (v == null) return '-';
+    final s = v.toString();
+    return s.length >= 10 ? s.substring(0, 10) : s;
+  }
+
+  int? _joursRestants(dynamic v) {
+    final d = DateTime.tryParse(v?.toString() ?? '');
+    if (d == null) return null;
+    final now = DateTime.now();
+    return DateTime(d.year, d.month, d.day)
+        .difference(DateTime(now.year, now.month, now.day))
+        .inDays;
+  }
+
+  String _etatReproduction(Map<String, dynamic>? a) {
+    if (a == null) return "Aucun accouplement enregistré";
+    if (a['date_mise_bas'] != null) {
+      return "A mis bas le ${_fmtDate(a['date_mise_bas'])}";
+    }
+    switch (a['statut_gestation']) {
+      case 'gestation_suspectee':
+        return "Gestation suspectée (semaine ${a['semaine_gestation'] ?? '?'})";
+      case 'non_fecondee':
+        return "Non fécondée";
+      case 'en_attente':
+        return "Accouplée — confirmation en attente";
+      default:
+        return a['statut_gestation']?.toString() ?? 'Statut inconnu';
+    }
+  }
+
+  Color _couleurReproduction(Map<String, dynamic>? a) {
+    if (a == null) return Colors.grey;
+    if (a['date_mise_bas'] != null) return Colors.teal;
+    switch (a['statut_gestation']) {
+      case 'gestation_suspectee':
+        return Colors.purple;
+      case 'non_fecondee':
+        return Colors.grey;
+      case 'en_attente':
+        return Colors.orange;
+      default:
+        return Colors.blueGrey;
     }
   }
 
@@ -584,7 +717,8 @@ class _ScanRFIDVeterinaireBluetoothState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Scan RFID - Vétérinaire"),
+        title: const Text("Scan RFID - Vétérinaire",
+        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.white),),
         backgroundColor: Colors.blue[700],
         actions: [
           IconButton(
@@ -924,10 +1058,10 @@ class _ScanRFIDVeterinaireBluetoothState
             child: Column(
               children: [
                 _buildInfoRow(
-                    Icons.agriculture, "Race", _animalInfo!['race'] ?? 'N/A'),
+                    Icons.category, "Race", _animalInfo!['race'] ?? 'N/A'),
                 const Divider(height: 24),
                 _buildInfoRow(
-                    Icons.wc, "Sexe", _animalInfo!['sexe'] ?? 'N/A'),
+                    Icons.transgender, "Sexe", _animalInfo!['sexe'] ?? 'N/A'),
                 const Divider(height: 24),
                 _buildInfoRow(Icons.nfc, "Tag RFID",
                     _animalInfo!['tag_rfid'] ?? 'N/A'),
@@ -944,6 +1078,9 @@ class _ScanRFIDVeterinaireBluetoothState
               ],
             ),
           ),
+
+          // ✅ État actuel (femelles uniquement)
+          if (_isFemale) _buildFemaleStatusSection(),
 
           // Boutons d'action
           Padding(
@@ -997,6 +1134,186 @@ class _ScanRFIDVeterinaireBluetoothState
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =====================================================
+  // SECTION "ÉTAT ACTUEL" POUR LES FEMELLES
+  // =====================================================
+  Widget _buildFemaleStatusSection() {
+    if (_loadingFemale) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: LinearProgressIndicator(),
+      );
+    }
+
+    final s = _femaleStatus;
+    if (s == null) return const SizedBox.shrink();
+
+    final acc = s['accouplement'] as Map<String, dynamic>?;
+    final chaleur = s['chaleur'] as Map<String, dynamic>?;
+    final vaccin = s['vaccin'] as Map<String, dynamic>?;
+    final consult = s['consultation'] as Map<String, dynamic>?;
+    final alertes = (s['alertes'] as List?) ?? [];
+
+    final couleur = _couleurReproduction(acc);
+    final enGestation = acc != null &&
+        acc['date_mise_bas'] == null &&
+        acc['statut_gestation'] == 'gestation_suspectee';
+    final jours = _joursRestants(acc?['date_prevue_agnelage']);
+
+    // Rappel de vaccin dépassé ?
+    final joursRappel = _joursRestants(vaccin?['date_rappel']);
+    final rappelDepasse = joursRappel != null && joursRappel < 0;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.pink[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.pink[200]!, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.female, color: Colors.pink[700]),
+              const SizedBox(width: 8),
+              const Text("État actuel",
+                  style:
+                      TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Reproduction
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: couleur.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: couleur),
+            ),
+            child: Text(
+              _etatReproduction(acc),
+              style: TextStyle(
+                  color: couleur, fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+          ),
+
+          if (enGestation) ...[
+            const SizedBox(height: 10),
+            _buildFemaleLine(
+                Icons.event,
+                "Agnelage prévu",
+                "${_fmtDate(acc['date_prevue_agnelage'])}"
+                    "${jours != null ? (jours >= 0 ? ' (dans $jours j)' : ' (dépassé de ${-jours} j)') : ''}"),
+            if (acc['probabilite_gestation'] != null)
+              _buildFemaleLine(
+                  Icons.percent,
+                  "Probabilité de gestation",
+                  "${((acc['probabilite_gestation'] as num) * 100).round()} %"),
+          ],
+
+          if (acc != null && acc['date_mise_bas'] != null) ...[
+            const SizedBox(height: 10),
+            if (acc['nombre_agneaux'] != null)
+              _buildFemaleLine(Icons.child_care, "Agneaux",
+                  acc['nombre_agneaux'].toString()),
+            _buildFemaleLine(
+                Icons.water_drop,
+                "Sevrage",
+                acc['sevrage_effectue'] != null
+                    ? "Effectué le ${_fmtDate(acc['sevrage_effectue'])}"
+                    : "Pas encore sevré (allaitante)"),
+          ],
+
+          const Divider(height: 24),
+
+          _buildFemaleLine(
+              Icons.favorite,
+              "Dernière chaleur",
+              chaleur == null
+                  ? "Aucune enregistrée"
+                  : "${_fmtDate(chaleur['date_chaleur'])}"
+                      "${chaleur['intensite'] != null ? ' (${chaleur['intensite']})' : ''}"),
+
+          _buildFemaleLine(
+              Icons.vaccines,
+              "Dernier vaccin",
+              vaccin == null
+                  ? "Aucun enregistré"
+                  : "${vaccin['nom_vaccin']} — ${_fmtDate(vaccin['date_vaccination'])}"),
+
+          if (vaccin?['date_rappel'] != null)
+            _buildFemaleLine(
+                Icons.notification_important,
+                "Rappel vaccin",
+                "${_fmtDate(vaccin!['date_rappel'])}"
+                    "${rappelDepasse ? ' — EN RETARD' : ''}",
+                color: rappelDepasse ? Colors.red : null),
+
+          _buildFemaleLine(
+              Icons.medical_information,
+              "Dernière consultation",
+              consult == null
+                  ? "Aucune"
+                  : "${_fmtDate(consult['date_consultation'])} — ${consult['motif'] ?? ''}"
+                      "${consult['poids_kg'] != null ? ' | ${consult['poids_kg']} kg' : ''}"
+                      "${consult['temperature_c'] != null ? ' | ${consult['temperature_c']} °C' : ''}"),
+
+          if (alertes.isNotEmpty) ...[
+            const Divider(height: 24),
+            for (final a in alertes)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  "⚠️ ${a['message']}",
+                  style: TextStyle(
+                    color: (a['priorite'] == 'urgente' ||
+                            a['priorite'] == 'haute')
+                        ? Colors.red
+                        : Colors.orange[800],
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFemaleLine(IconData icon, String label, String value,
+      {Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: color ?? Colors.pink[700]),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                      text: "$label : ",
+                      style: TextStyle(color: Colors.grey[700])),
+                  TextSpan(
+                      text: value,
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, color: color)),
+                ],
+              ),
             ),
           ),
         ],

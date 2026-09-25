@@ -3,6 +3,8 @@
 // Fichier: lib/Eleveures/New/genealogique/ArbreGenealogique.dart
 // ============================================================
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:depart/widgets/couleur.dart';
@@ -113,7 +115,8 @@ class _GenealogieService {
     try {
       final res = await _supabase
           .from(table)
-          .select('id, nom, sexe, race, image_url, pere_id, mere_id, source_pere, source_mere')
+          .select(
+              'id, nom, sexe, race, image_url, pere_id, mere_id, source_pere, source_mere')
           .eq('id', id)
           .maybeSingle();
       if (res == null) return null;
@@ -129,7 +132,8 @@ class _GenealogieService {
       final results = await Future.wait([
         _supabase
             .from('nouveaux_nee')
-            .select('id, nom, sexe, race, image_url, pere_id, mere_id, source_pere, source_mere')
+            .select(
+                'id, nom, sexe, race, image_url, pere_id, mere_id, source_pere, source_mere')
             .eq('user_id', userId),
         _supabase
             .from('animal_acheter')
@@ -175,21 +179,30 @@ class _GenealogieService {
     ArbreNoeud? arbreMere;
 
     if (genActuelle < maxGen) {
+      // Les deux parents sont chargés en parallèle
+      final futures = await Future.wait([
+        if (animal.pereId != null && animal.sourcePere != null)
+          buildArbre(
+            animal.pereId!,
+            animal.sourcePere!,
+            maxGen: maxGen,
+            genActuelle: genActuelle + 1,
+          ),
+        if (animal.mereId != null && animal.sourceMere != null)
+          buildArbre(
+            animal.mereId!,
+            animal.sourceMere!,
+            maxGen: maxGen,
+            genActuelle: genActuelle + 1,
+          ),
+      ]);
+
+      var i = 0;
       if (animal.pereId != null && animal.sourcePere != null) {
-        arbrePere = await buildArbre(
-          animal.pereId!,
-          animal.sourcePere!,
-          maxGen: maxGen,
-          genActuelle: genActuelle + 1,
-        );
+        arbrePere = futures[i++];
       }
       if (animal.mereId != null && animal.sourceMere != null) {
-        arbreMere = await buildArbre(
-          animal.mereId!,
-          animal.sourceMere!,
-          maxGen: maxGen,
-          genActuelle: genActuelle + 1,
-        );
+        arbreMere = futures[i++];
       }
     }
 
@@ -214,14 +227,25 @@ class ArbreGenealogique extends StatefulWidget {
 }
 
 class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
+  // Dimensions utilisées pour le calcul de la mise en page de l'arbre
+  static const double _largeurRacine = 140.0;
+  static const double _largeurNoeud = 118.0;
+  static const double _espaceEntreParents = 16.0;
+  static const double _hauteurConnecteur = 36.0;
+  static const double _hauteurNoeud = 118.0;
+  static const double _hauteurRacine = 145.0;
+  static const double _paddingArbre = 40.0;
+
   final _service = _GenealogieService();
   final _supabase = Supabase.instance.client;
+  final _transfoCtrl = TransformationController();
 
   List<AnimalNoeud> _animaux = [];
   AnimalNoeud? _animalSelectionne;
   ArbreNoeud? _arbre;
   bool _loadingListe = true;
   bool _loadingArbre = false;
+  bool _doitCentrer = false;
   String? _erreur;
   int _maxGenerations = 3;
   AnimalNoeud? _noeudDetail;
@@ -237,6 +261,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _transfoCtrl.dispose();
     super.dispose();
   }
 
@@ -244,10 +269,14 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
     setState(() => _loadingListe = true);
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) {
-      setState(() { _loadingListe = false; _erreur = 'Non connecté'; });
+      setState(() {
+        _loadingListe = false;
+        _erreur = 'Non connecté';
+      });
       return;
     }
     final animaux = await _service.fetchTousAnimaux(userId);
+    if (!mounted) return;
     setState(() {
       _animaux = animaux;
       _loadingListe = false;
@@ -266,9 +295,12 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
       animal.source,
       maxGen: _maxGenerations,
     );
+    // L'utilisateur a pu quitter la page ou choisir un autre animal
+    if (!mounted || _animalSelectionne?.id != animal.id) return;
     setState(() {
       _arbre = arbre;
       _loadingArbre = false;
+      _doitCentrer = true;
     });
   }
 
@@ -282,13 +314,15 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: const Color.fromARGB(255, 241, 248, 233),
       appBar: _buildAppBar(),
       body: _loadingListe
           ? Center(child: CircularProgressIndicator(color: Couleur.PremierColor))
-          : _animalSelectionne == null
-              ? _buildEcranSelection()
-              : _buildEcranArbre(),
+          : _erreur != null
+              ? Center(child: Text(_erreur!))
+              : _animalSelectionne == null
+                  ? _buildEcranSelection()
+                  : _buildEcranArbre(),
     );
   }
 
@@ -427,9 +461,8 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
   }
 
   Widget _buildCarteAnimal(AnimalNoeud animal) {
-    final couleur = animal.estMale
-        ? const Color(0xFF1A5276)
-        : const Color(0xFF922B21);
+    final couleur =
+        animal.estMale ? const Color(0xFF1A5276) : const Color(0xFF922B21);
     final couleurStatut = _couleurStatut(animal.statutGenealogie);
 
     return Card(
@@ -509,16 +542,31 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
                 )
               : _arbre == null
                   ? const Center(child: Text('Aucune donnée'))
-                  : InteractiveViewer(
-                      boundaryMargin: const EdgeInsets.all(300),
-                      minScale: 0.2,
-                      maxScale: 2.5,
-                      child: Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(40),
-                          child: _buildNoeudArbre(_arbre!),
-                        ),
-                      ),
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        // Centre / ajuste l'arbre une fois après chaque chargement
+                        if (_doitCentrer) {
+                          _doitCentrer = false;
+                          final viewport = constraints.biggest;
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted) _centrerArbre(viewport);
+                          });
+                        }
+
+                        return InteractiveViewer(
+                          // ✅ CORRECTION PRINCIPALE : l'enfant prend sa taille
+                          // naturelle au lieu d'être forcé à la largeur de l'écran
+                          constrained: false,
+                          transformationController: _transfoCtrl,
+                          boundaryMargin: const EdgeInsets.all(300),
+                          minScale: 0.1,
+                          maxScale: 2.5,
+                          child: Padding(
+                            padding: const EdgeInsets.all(_paddingArbre),
+                            child: _buildNoeudArbre(_arbre!),
+                          ),
+                        );
+                      },
                     ),
         ),
 
@@ -528,76 +576,112 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
     );
   }
 
+  /// Ajuste le zoom et centre l'arbre dans la zone visible.
+  void _centrerArbre(Size viewport) {
+    if (_arbre == null) return;
+
+    final contenuW = _largeurArbre(_arbre!) + _paddingArbre * 2;
+    final contenuH = _maxGenerations * (_hauteurNoeud + _hauteurConnecteur) +
+        _hauteurRacine +
+        _paddingArbre * 2;
+
+    final echelle = math
+        .min(1.0, math.min(viewport.width / contenuW, viewport.height / contenuH))
+        .clamp(0.1, 1.0)
+        .toDouble();
+
+    final dx = (viewport.width - contenuW * echelle) / 2;
+    final dy = (viewport.height - contenuH * echelle) / 2;
+
+    _transfoCtrl.value = Matrix4.identity()
+      ..translate(dx, dy)
+      ..scale(echelle);
+  }
+
+  // ── Calcul des largeurs (pour aligner les connecteurs) ──────
+
+  double _largeurArbre(ArbreNoeud noeud) {
+    final largeurNoeud =
+        noeud.generation == 0 ? _largeurRacine : _largeurNoeud;
+    if (noeud.generation >= _maxGenerations) return largeurNoeud;
+
+    final total = _largeurCote(noeud.pere) +
+        _espaceEntreParents +
+        _largeurCote(noeud.mere);
+    return math.max(largeurNoeud, total);
+  }
+
+  double _largeurCote(ArbreNoeud? arbre) =>
+      arbre == null ? _largeurNoeud : _largeurArbre(arbre);
+
+  // ── Construction récursive de l'arbre ───────────────────────
+
   Widget _buildNoeudArbre(ArbreNoeud noeud) {
-    final aParents = noeud.pere != null || noeud.mere != null;
-    final aParentInconnu =
-        noeud.animal.pereId == null || noeud.animal.mereId == null;
+    final estRacine = noeud.generation == 0;
+    final afficherParents = noeud.generation < _maxGenerations;
+
+    // Dernière génération : on affiche juste le nœud
+    if (!afficherParents) {
+      return _buildNoeud(noeud.animal, estRacine: estRacine);
+    }
+
+    final largeurPere = _largeurCote(noeud.pere);
+    final largeurMere = _largeurCote(noeud.mere);
+    final largeurTotale = largeurPere + _espaceEntreParents + largeurMere;
+
+    // Position (en x) du centre de chaque parent dans la rangée
+    final xPere = largeurPere / 2;
+    final xMere = largeurPere + _espaceEntreParents + largeurMere / 2;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         // Rangée parents
-        if (aParents || (aParentInconnu && noeud.generation < _maxGenerations))
-          Row(
+        SizedBox(
+          width: largeurTotale,
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              _buildCote(
-                arbre: noeud.pere,
-                inconnu: noeud.animal.pereId == null,
-                estPere: true,
-                generation: noeud.generation,
-              ),
-              const SizedBox(width: 16),
-              _buildCote(
-                arbre: noeud.mere,
-                inconnu: noeud.animal.mereId == null,
-                estPere: false,
-                generation: noeud.generation,
-              ),
+              _buildCote(arbre: noeud.pere, estPere: true),
+              const SizedBox(width: _espaceEntreParents),
+              _buildCote(arbre: noeud.mere, estPere: false),
             ],
           ),
+        ),
 
-        // Connecteur
-        if (aParents || (aParentInconnu && noeud.generation < _maxGenerations))
-          _buildConnecteur(),
+        // Connecteur : s'aligne exactement sur le centre de chaque parent
+        SizedBox(
+          width: largeurTotale,
+          height: _hauteurConnecteur,
+          child: CustomPaint(
+            painter: _ConnecteurPainter(
+              couleur: Couleur.PremierColor,
+              xParents: [xPere, xMere],
+            ),
+          ),
+        ),
 
         // Nœud courant
-        _buildNoeud(noeud.animal, estRacine: noeud.generation == 0),
+        _buildNoeud(noeud.animal, estRacine: estRacine),
       ],
     );
   }
 
-  Widget _buildCote({
-    ArbreNoeud? arbre,
-    required bool inconnu,
-    required bool estPere,
-    required int generation,
-  }) {
+  Widget _buildCote({ArbreNoeud? arbre, required bool estPere}) {
     if (arbre != null) return _buildNoeudArbre(arbre);
-    if (inconnu && generation < _maxGenerations) {
-      return _buildNoeudInconnu(estPere ? 'Père inconnu' : 'Mère inconnue');
-    }
-    return const SizedBox.shrink();
-  }
-
-  Widget _buildConnecteur() {
-    return SizedBox(
-      width: 140,
-      height: 36,
-      child: CustomPaint(painter: _ConnecteurPainter(Couleur.PremierColor)),
-    );
+    return _buildNoeudInconnu(estPere ? 'Père inconnu' : 'Mère inconnue');
   }
 
   Widget _buildNoeud(AnimalNoeud animal, {bool estRacine = false}) {
     final estSelectionne = _noeudDetail?.id == animal.id;
     final couleur =
         animal.estMale ? const Color(0xFF1A5276) : const Color(0xFF922B21);
-    final largeur = estRacine ? 140.0 : 118.0;
+    final largeur = estRacine ? _largeurRacine : _largeurNoeud;
 
     return GestureDetector(
-      onTap: () => setState(
-          () => _noeudDetail = estSelectionne ? null : animal),
+      onTap: () =>
+          setState(() => _noeudDetail = estSelectionne ? null : animal),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         width: largeur,
@@ -671,8 +755,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
                   if (animal.race != null)
                     Text(
                       animal.race!,
-                      style:
-                          TextStyle(fontSize: 9, color: Colors.grey[600]),
+                      style: TextStyle(fontSize: 9, color: Colors.grey[600]),
                       overflow: TextOverflow.ellipsis,
                     ),
                   _buildPastilleStatut(animal.statutGenealogie),
@@ -687,7 +770,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
 
   Widget _buildNoeudInconnu(String label) {
     return Container(
-      width: 118,
+      width: _largeurNoeud,
       decoration: BoxDecoration(
         color: const Color(0xFFF8F9FA),
         borderRadius: BorderRadius.circular(14),
@@ -698,8 +781,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
         children: [
           Container(
             width: double.infinity,
-            padding:
-                const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
+            padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
             decoration: BoxDecoration(
               color: Colors.grey[400],
               borderRadius:
@@ -758,9 +840,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
       child: Text(
         texte,
         style: TextStyle(
-            fontSize: 8,
-            color: couleur,
-            fontWeight: FontWeight.w600),
+            fontSize: 8, color: couleur, fontWeight: FontWeight.w600),
       ),
     );
   }
@@ -799,8 +879,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
                   '${animal.estMale ? "Bélier" : "Brebis"}'
                   '${animal.race != null ? " · ${animal.race}" : ""}'
                   ' · ${animal.labelStatut}',
-                  style:
-                      const TextStyle(color: Colors.white70, fontSize: 11),
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
                 ),
               ],
             ),
@@ -837,8 +916,7 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
       children: [
         Icon(icone, color: couleur, size: 18),
         const SizedBox(height: 2),
-        Text(label,
-            style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+        Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
       ],
     );
   }
@@ -857,27 +935,48 @@ class _ArbreGeneralogiqueState extends State<ArbreGenealogique> {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PAINTER : lignes de connexion
+// PAINTER : lignes de connexion (père + mère → enfant)
 // ─────────────────────────────────────────────────────────────
 
 class _ConnecteurPainter extends CustomPainter {
   final Color couleur;
-  _ConnecteurPainter(this.couleur);
+
+  /// Positions x (centre) de chaque parent, relatives à la largeur du connecteur
+  final List<double> xParents;
+
+  _ConnecteurPainter({required this.couleur, required this.xParents});
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (xParents.isEmpty) return;
+
     final paint = Paint()
       ..color = couleur.withOpacity(0.4)
       ..strokeWidth = 1.8
       ..style = PaintingStyle.stroke;
 
-    final cx = size.width / 2;
     final cy = size.height / 2;
+    final cx = size.width / 2; // l'enfant est centré sous la rangée
 
-    canvas.drawLine(Offset(0, cy), Offset(size.width, cy), paint);
+    // Traits verticaux depuis chaque parent
+    for (final x in xParents) {
+      canvas.drawLine(Offset(x, 0), Offset(x, cy), paint);
+    }
+
+    // Trait horizontal reliant les parents
+    if (xParents.length > 1) {
+      canvas.drawLine(
+        Offset(xParents.first, cy),
+        Offset(xParents.last, cy),
+        paint,
+      );
+    }
+
+    // Trait vertical vers l'enfant
     canvas.drawLine(Offset(cx, cy), Offset(cx, size.height), paint);
   }
 
   @override
-  bool shouldRepaint(_) => false;
+  bool shouldRepaint(covariant _ConnecteurPainter old) =>
+      old.couleur != couleur || old.xParents.join() != xParents.join();
 }

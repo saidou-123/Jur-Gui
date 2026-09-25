@@ -544,8 +544,8 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
               child: Column(
                 children: [
                   _buildInfoRow(Icons.pets, "Nom", existing['nom'] ?? 'N/A'),
-                  _buildInfoRow(Icons.agriculture, "Race", existing['race'] ?? 'N/A'),
-                  _buildInfoRow(Icons.wc, "Sexe", existing['sexe'] ?? 'N/A'),
+                  _buildInfoRow(Icons.category, "Race", existing['race'] ?? 'N/A'),
+                  _buildInfoRow(Icons.transgender, "Sexe", existing['sexe'] ?? 'N/A'),
                   _buildInfoRow(Icons.location_on, "Provenance", existing['provenance'] ?? 'N/A'),
                   _buildInfoRow(Icons.nfc, "Tag", existing['tag_rfid'] ?? 'N/A'),
                 ],
@@ -774,9 +774,10 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color.fromARGB(255, 241, 248, 233),
       appBar: AppBar(
-        title: const Text("Jur Gui 4.0 - Animal Acheté"),
-        backgroundColor: Colors.green[700],
+        title: const Text("Animal Acheté"),
+        backgroundColor:  const Color.fromARGB(255, 241, 248, 233),
         actions: [
           IconButton(
             icon: Icon(
@@ -794,6 +795,8 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
           ),
         ],
       ),
+
+      
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
@@ -827,7 +830,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
 
                   _buildChampStyleParent(
                     label: "Sexe",
-                    icone: Icons.wc,
+                    icone: Icons.transgender,
                     couleur: _couleurSexe,
                     valeur: _selectedSexe,
                     resume: _selectedSexe,
@@ -857,7 +860,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
 
                   _buildChampStyleParent(
                     label: "Race",
-                    icone: Icons.agriculture,
+                    icone: Icons.category,
                     couleur: _couleurRace,
                     valeur: _selectedRace,
                     resume: _selectedRace,
@@ -991,7 +994,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   Widget _buildSexeDropdownStyled() {
     return DropdownButtonFormField<String>(
       value: _selectedSexe,
-      decoration: _inputDeco("Choisir le sexe…", Icons.wc, _couleurSexe),
+      decoration: _inputDeco("Choisir le sexe…", Icons.category, _couleurSexe),
       items: const [
         DropdownMenuItem(value: "Mâle", child: Text("Mâle")),
         DropdownMenuItem(value: "Femelle", child: Text("Femelle")),
@@ -1003,7 +1006,7 @@ class _AnimalAchateBluetoothState extends State<AnimalAchateBluetooth> {
   Widget _buildRaceDropdownStyled() {
     return DropdownButtonFormField<String>(
       value: _selectedRace,
-      decoration: _inputDeco("Choisir la race…", Icons.agriculture, _couleurRace),
+      decoration: _inputDeco("Choisir la race…", Icons.transgender, _couleurRace),
       items: const [
         DropdownMenuItem(value: "Ladoum", child: Text("Ladoum")),
         DropdownMenuItem(value: "Peulh Peulh", child: Text("Peulh Peulh")),

@@ -255,12 +255,11 @@ class _AcceuilState extends State<Acceuil> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // ★ Fond blanc uni (au lieu du dégradé de couleurs).
-      backgroundColor: Colors.white,
+      backgroundColor: const Color.fromARGB(255, 241, 248, 233),
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        color: Colors.white,
+        color: const Color.fromARGB(255, 241, 248, 233),
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(24.0),
@@ -426,8 +425,7 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // ★ Fond blanc, cohérent avec Acceuil.
-      backgroundColor: Colors.white,
+      backgroundColor: const Color.fromARGB(255, 241, 248, 233),
       body: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [

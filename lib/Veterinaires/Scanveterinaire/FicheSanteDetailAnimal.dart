@@ -124,8 +124,8 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
             ).then((ok) {
               if (ok == true) _chargerDossierMedical();
             }),
-            icon: const Icon(Icons.vaccines),
-            label: const Text('Vaccination'),
+            icon: const Icon(Icons.vaccines,color: Colors.white),
+            label: const Text('Vaccination',style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),),
             backgroundColor: Colors.blue[700],
           ),
           const SizedBox(height: 10),
@@ -142,9 +142,9 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
             ).then((ok) {
               if (ok == true) _chargerDossierMedical();
             }),
-            icon: const Icon(Icons.medical_services),
-            label: const Text('Consultation'),
-            backgroundColor: Colors.green[700],
+            icon: const Icon(Icons.medical_services,color: Colors.white,),
+            label: const Text('Consultation', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),),
+            backgroundColor: Colors.blue[700],
           ),
         ],
       ),
@@ -182,10 +182,10 @@ class _FicheSanteDetailAnimalState extends State<FicheSanteDetailAnimal> {
             const SizedBox(height: 16),
             _buildInfoRow(
                 Icons.pets, 'Nom', widget.animal['nom'] ?? 'N/A'),
-            _buildInfoRow(Icons.agriculture, 'Race',
+            _buildInfoRow(Icons.category, 'Race',
                 widget.animal['race'] ?? 'N/A'),
             _buildInfoRow(
-                Icons.wc, 'Sexe', widget.animal['sexe'] ?? 'N/A'),
+                Icons.transgender, 'Sexe', widget.animal['sexe'] ?? 'N/A'),
             _buildInfoRow(Icons.nfc, 'Tag RFID',
                 widget.animal['tag_rfid'] ?? 'N/A'),
             if (widget.animal['date_naissance'] != null)

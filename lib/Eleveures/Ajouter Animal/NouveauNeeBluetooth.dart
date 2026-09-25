@@ -783,9 +783,10 @@ class _NouveauNeeBluetoothState extends State<NouveauNeeBluetooth> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color.fromARGB(255, 241, 248, 233),
       appBar: AppBar(
-        title          : const Text("Jur Gui 4.0 - Nouveau-né"),
-        backgroundColor: Colors.green[700],
+        title          : const Text("Nouveau-né"),
+        backgroundColor:const Color.fromARGB(255, 241, 248, 233),
         actions: [
           IconButton(
             icon: Icon(

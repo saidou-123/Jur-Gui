@@ -358,7 +358,7 @@ class _CopilotPageState extends State<CopilotPage>
               borderRadius: BorderRadius.circular(20),
             ),
             child: Icon(Icons.smart_toy_outlined,
-                color: _vert, size: 36),
+                color: const Color.from(alpha: 1, red: 0.106, green: 0.369, blue: 0.125), size: 36),
           ),
           const SizedBox(height: 16),
           Text('Bonjour ! Je suis votre assistant élevage.',

@@ -37,6 +37,7 @@ class _HomepageState extends State<Homepage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color.fromARGB(255, 241, 248, 233),
       body: SafeArea(
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12),

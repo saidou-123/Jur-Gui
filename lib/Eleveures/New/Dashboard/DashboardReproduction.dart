@@ -302,14 +302,14 @@ class _DashboardReproductionState extends State<DashboardReproduction>
 
               // Graphique évolution — FUSIONNÉ (chaleurs + accouplements + agnelages)
               _buildTitreSection(
-                  '📊 Évolution mensuelle', 'Chaleurs · Accouplements · Agnelages'),
+                  'Évolution mensuelle', 'Chaleurs · Accouplements · Agnelages'),
               const SizedBox(height: 12),
               _buildGraphiqueEvolutionFusionnee(),
               const SizedBox(height: 24),
 
               // Graphique circulaire — état du troupeau
               _buildTitreSection(
-                  '🐑 État actuel du troupeau', 'Répartition par statut reproductif'),
+                  'État actuel du troupeau', 'Répartition par statut reproductif'),
               const SizedBox(height: 12),
               _buildGraphiqueCirculaire(),
             ],

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 class Couleur {
   static var PremierColor = const Color.fromARGB(255, 5, 87, 46);
   static var DeuxiemeColor = const Color.fromARGB(255, 0, 149, 75);
-  static var TroisciemeColor = const Color.fromARGB(255, 69, 43, 2);
+ static var TroisciemeColor = const Color.fromARGB(255, 241, 248, 233);
   static var QuatriemeColor = const Color.fromARGB(255, 255, 252, 248);
 
   static var titleOne =

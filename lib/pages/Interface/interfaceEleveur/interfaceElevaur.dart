@@ -498,7 +498,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: const Color.fromARGB(255, 241, 248, 233),
       appBar: _buildAppBar(),
       drawer: _buildDrawer(),
       floatingActionButton: _buildCopilotFAB(),
@@ -562,11 +562,11 @@ class _interfaceElevaureState extends State<interfaceElevaur>
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       title: const Text(
-        "JUR GUI - Éleveur",
+        "Éleveur",
         style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
       ),
       centerTitle: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Couleur.TroisciemeColor,
       foregroundColor: Couleur.PremierColor,
       elevation: 2,
       iconTheme: IconThemeData(color: Couleur.PremierColor),
@@ -578,7 +578,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
             icon: Stack(
               clipBehavior: Clip.none,
               children: [
-                Icon(Icons.notifications_outlined, color: Colors.blue[700]),
+                Icon(Icons.notifications_outlined, color: Couleur.PremierColor),
                 if (_notifNonLues > 0)
                   Positioned(
                     right: -4,
@@ -633,7 +633,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
           currentIndex: _selectedIndex,
           onTap: _onNavTap,
           type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.white,
+          backgroundColor: Couleur.TroisciemeColor,
           selectedItemColor: Couleur.PremierColor,
           unselectedItemColor: Colors.grey[400],
           selectedLabelStyle:
@@ -643,16 +643,19 @@ class _interfaceElevaureState extends State<interfaceElevaur>
           elevation: 0,
           items: [
             BottomNavigationBarItem(
+              backgroundColor: Colors.white,
               icon: _navIcon(Icons.home_outlined, 0),
               activeIcon: _navIconActive(Icons.home_rounded, 0),
               label: "Accueil",
             ),
             BottomNavigationBarItem(
+              backgroundColor: Colors.white,
               icon: _navIcon(Icons.scanner, 1),
               activeIcon: _navIconActive(Icons.scanner, 1),
               label: "Partage",
             ),
             BottomNavigationBarItem(
+              backgroundColor: Colors.white,
               icon: _navIcon(Icons.add_circle_outline, 2),
               activeIcon: _navIconActive(Icons.add_circle, 2),
               label: "Ajouter",
@@ -965,10 +968,10 @@ class _interfaceElevaureState extends State<interfaceElevaur>
           children: [
             Expanded(
               child: optioncardEleveur(
-                image: 'assets/image/img6.png',
-                label: "Mon Troupeau",
-                route: const MonTroupeau(),
-                backgroundColor: const Color(0xFFE8F5E9),
+                image: 'assets/image/img14.png',
+                label: 'Ajouter Animal',
+                route: const AjouterAnimal(),
+                backgroundColor:Color.fromARGB(255, 255, 255, 255),
               ),
             ),
             const SizedBox(width: 12),
@@ -977,7 +980,7 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                 image: 'assets/image/img10.png',
                 label: 'Période Chaleur',
                 route: const ChaleurModule(),
-                backgroundColor: const Color(0xFFFFF3E0),
+                backgroundColor: const Color.fromARGB(255, 255, 255, 255),
               ),
             ),
           ],
@@ -990,33 +993,18 @@ class _interfaceElevaureState extends State<interfaceElevaur>
                 image: 'assets/image/img5.png',
                 label: "Accouplement",
                 route: EnregistrerAccouplement(),
-                backgroundColor: const Color(0xFFFCE4EC),
+                backgroundColor: Color.fromARGB(255, 255, 255, 255),
               ),
             ),
             const SizedBox(width: 12),
-            Expanded(
-              child: optioncardEleveur(
-                image: 'assets/image/img14.png',
-                label: 'Ajouter Animal',
-                route: const AjouterAnimal(),
-                backgroundColor: const Color(0xFFFFF9C4),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
+             Expanded(
               child: optioncardEleveur(
                 image: 'assets/image/img5.png',
                 label: "Genealogique",
                 route: const ArbreGenealogique(),
-                backgroundColor: const Color(0xFFE3F2FD),
+                backgroundColor: Color.fromARGB(255, 255, 255, 255),
               ),
             ),
-            const SizedBox(width: 12),
-            const Expanded(child: SizedBox()),
           ],
         ),
       ],

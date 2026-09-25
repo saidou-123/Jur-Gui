@@ -733,6 +733,7 @@ class _EnregistrerAccouplementState extends State<EnregistrerAccouplement> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color.fromARGB(255, 241, 248, 233),
       appBar: AppBar(
         title          : const Text('Enregistrer un accouplement'),
         backgroundColor: Color(ReproductionConfig.colorSecondary),

@@ -203,7 +203,7 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
         DateTime.parse(_chaleurs.first['date_chaleur']).isAfter(il48h);
 
     if (enGestation) {
-      _statutActuel = 'Gestante 🤰';
+      _statutActuel = 'Gestante 🐑💗';
       _couleurStatut = const Color(0xFF8E24AA);
       // Chercher date agnelage prévu
       final gestationCourante = _accouplements.firstWhere((a) =>
@@ -215,7 +215,7 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
             DateTime.parse(gestationCourante['date_prevue_agnelage']);
       }
     } else if (enChaleur) {
-      _statutActuel = 'En chaleur 🔥';
+      _statutActuel = 'En chaleur 🐑❤️‍🔥';
       _couleurStatut = const Color(0xFFE53935);
     } else {
       _statutActuel = 'Disponible ✅';
@@ -411,7 +411,7 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
           Tab(text: 'Résumé', icon: Icon(Icons.dashboard_rounded, size: 18)),
           Tab(text: 'Chaleurs', icon: Icon(Icons.local_fire_department_rounded, size: 18)),
           Tab(text: 'Accouplements', icon: Icon(Icons.favorite_rounded, size: 18)),
-          Tab(text: 'Agnelages', icon: Icon(Icons.child_care_rounded, size: 18)),
+          Tab(text: 'Agnelages', icon: Icon(Icons.pets, size: 18)),
         ],
       ),
     );
@@ -706,10 +706,10 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
                     children: [
                       Text(
                         depasse
-                            ? '🚨 Mise bas imminente !'
+                            ? '🐑🚨 Mise bas imminente !'
                             : urgent
-                                ? '⚠️ Agnelage dans $jours jour${jours > 1 ? 's' : ''}'
-                                : '🤰 Gestation — $jours jours restants',
+                                ? '🐑⚠️ Agnelage dans $jours jour${jours > 1 ? 's' : ''}'
+                                : '🐑💗 Gestation — $jours jours restants',
                         style: TextStyle(
                           fontWeight: FontWeight.w700,
                           fontSize: 14, color: couleur),
@@ -1003,7 +1003,7 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('🔥 Prochaine chaleur estimée',
+                const Text('🐑❤️‍🔥 Prochaine chaleur estimée',
                     style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 13,
@@ -1263,21 +1263,21 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Graphique ligne — historique chaleurs
-          _buildTitre('🔥 Historique des chaleurs',
+          _buildTitre('Historique des chaleurs',
               'Nombre de chaleurs détectées par mois'),
           const SizedBox(height: 12),
           _buildGraphiqueLigneChaleurs(),
           const SizedBox(height: 20),
 
           // Graphique intensité
-          _buildTitre('📊 Intensité des chaleurs', 'Répartition par niveau'),
+          _buildTitre('Intensité des chaleurs', 'Répartition par niveau'),
           const SizedBox(height: 12),
           _buildGraphiqueIntensiteChaleurs(),
           const SizedBox(height: 20),
 
           // Liste chronologique
           _buildTitre(
-              '📋 Historique détaillé', '${_totalChaleurs} chaleur(s) enregistrée(s)'),
+              'Historique détaillé', '${_totalChaleurs} chaleur(s) enregistrée(s)'),
           const SizedBox(height: 12),
           _buildListeChaleurs(),
         ],
@@ -1552,7 +1552,7 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildTitre('❤️ Évolution des accouplements', 'Par mois sur la période'),
+          _buildTitre(' Évolution des accouplements', 'Par mois sur la période'),
           const SizedBox(height: 12),
           _buildGraphiqueBarresSimple(
             donnees: _donneesMensuelles.map((d) => d.accouplements).toList(),
@@ -1560,7 +1560,7 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
             labelTooltip: 'accouplement(s)',
           ),
           const SizedBox(height: 20),
-          _buildTitre('📋 Historique détaillé',
+          _buildTitre('Historique détaillé',
               '${_totalAccouplements} accouplement(s)'),
           const SizedBox(height: 12),
           _buildListeAccouplements(),
@@ -1723,7 +1723,7 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildTitre('🍼 Évolution des agnelages', 'Naissances par mois'),
+          _buildTitre('Évolution des agnelages', 'Naissances par mois'),
           const SizedBox(height: 12),
           _buildGraphiqueBarresSimple(
             donnees: _donneesMensuelles.map((d) => d.agnelages).toList(),
@@ -1733,13 +1733,13 @@ class _BrebisDetailPageState extends State<BrebisDetailPage>
           const SizedBox(height: 20),
 
           // Courbe cumulative
-          _buildTitre('📈 Agnelages cumulés', 'Progression totale'),
+          _buildTitre('Agnelages cumulés', 'Progression totale'),
           const SizedBox(height: 12),
           _buildGraphiqueAgnelagesCumules(),
           const SizedBox(height: 20),
 
           _buildTitre(
-              '📋 Historique détaillé', '${_totalAgnelages} agnelage(s)'),
+              'Historique détaillé', '${_totalAgnelages} agnelage(s)'),
           const SizedBox(height: 12),
           _buildListeAgnelages(),
         ],

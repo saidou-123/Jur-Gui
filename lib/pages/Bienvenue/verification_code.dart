@@ -226,7 +226,7 @@ class _VerificationCodePageState extends State<VerificationCodePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color.fromARGB(255, 241, 248, 233),
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,

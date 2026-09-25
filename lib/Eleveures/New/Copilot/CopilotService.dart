@@ -307,7 +307,7 @@ class CopilotContextBuilder {
         .from('accouplements')
         .select('brebis_id, source_brebis, date_accouplement, '
             'date_prevue_agnelage, date_mise_bas, nombre_agneaux, '
-            'resultat_ia, f_pourcent_ia')
+            'resultat_ia, f_pourcent_ia, statut_gestation')
         .eq('user_id', userId)
         .order('date_accouplement', ascending: false);
     return List<Map<String, dynamic>>.from(r);
@@ -389,12 +389,21 @@ class CopilotContextBuilder {
 
   // ── Helpers ───────────────────────────────────────────────
 
+  // ✅ CORRECTION : même bug que dans les autres fichiers — sans le
+  // filtre sur statut_gestation, le copilote continuait de décrire
+  // une brebis comme gestante après annulation de sa gestation.
   DateTime? _estGestante(List accouplements, dynamic id, String src) {
+    const statutsActifs = [
+      'en_attente',
+      'gestation_suspectee',
+      'gestation_confirmee'
+    ];
     final acc = accouplements.firstWhere(
       (a) => a['brebis_id'].toString() == id.toString() &&
           a['source_brebis'] == src &&
           a['date_mise_bas'] == null &&
-          a['date_prevue_agnelage'] != null,
+          a['date_prevue_agnelage'] != null &&
+          statutsActifs.contains(a['statut_gestation']),
       orElse: () => <String, dynamic>{},
     );
     if ((acc as Map).isEmpty) return null;
